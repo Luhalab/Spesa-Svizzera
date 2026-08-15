@@ -4,11 +4,6 @@ import { CHAINS, CITIES } from "../lib/demoCatalog";
 
 const money = (v) => (v == null ? "—" : `CHF ${v.toFixed(2)}`);
 
-// Se NEXT_PUBLIC_BACKEND_URL è impostato (backend Railway/Render sempre acceso),
-// lo usiamo per avere prezzi reali. Altrimenti si torna alla funzione serverless
-// di Vercel /api/search, che ha il fallback ai dati demo.
-const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "";
-
 export default function Home() {
   const [step, setStep] = useState("lista");
   const [list, setList] = useState([]);
@@ -25,10 +20,7 @@ export default function Home() {
     setSearching(true);
     setSearchError("");
     try {
-      const url = BACKEND_URL
-        ? `${BACKEND_URL}/search?q=${encodeURIComponent(term)}`
-        : `/api/search?q=${encodeURIComponent(term)}`;
-      const res = await fetch(url);
+      const res = await fetch(`/api/search?q=${encodeURIComponent(term)}`);
       const data = await res.json();
       if (!data.results || data.results.length === 0) {
         setSearchError(`Nessun prodotto trovato per "${term}"`);
@@ -42,7 +34,8 @@ export default function Home() {
           copy[idx] = { ...copy[idx], qty: copy[idx].qty + 1 };
           return copy;
         }
-        return [...l, { ...product, qty: 1, source: data.source }];
+        const hasPromo = Array.isArray(data.promotions) && data.promotions.length > 0;
+        return [...l, { ...product, qty: 1, source: data.source, hasPromo }];
       });
       setQuery("");
     } catch (err) {
@@ -138,16 +131,17 @@ export default function Home() {
             </div>
             {searchError && <div style={styles.errorText}>{searchError}</div>}
             <div style={styles.footnoteSmall}>
-              {BACKEND_URL
-                ? "Ricerca collegata al backend reale."
-                : "Backend non ancora collegato: ricerca in modalità demo (vedi README, sezione 3)."}
+              Ricerca collegata a swissgroceries-mcp (prezzi reali). La prima ricerca dopo un
+              po' di inattività può richiedere qualche secondo in più.
             </div>
 
             <ul style={styles.list}>
-              {list.map(({ id, name, unit, qty, source }) => (
+              {list.map(({ id, name, unit, qty, source, hasPromo }) => (
                 <li key={id} style={styles.listItem}>
                   <div style={{ flex: 1 }}>
-                    <div style={styles.itemName}>{name}</div>
+                    <div style={styles.itemName}>
+                      {name} {hasPromo && <span style={styles.promoBadge}>in promozione</span>}
+                    </div>
                     <div style={styles.itemUnit}>
                       {unit} {source === "demo" && "· dati demo"}
                     </div>
@@ -292,6 +286,7 @@ const styles = {
   listItem: { display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: "1px solid #F0EEE8" },
   itemName: { fontSize: 13.5, fontWeight: 500 },
   itemUnit: { fontSize: 11.5, color: "#8A8A85" },
+  promoBadge: { fontSize: 10, color: "#D8232A", border: "1px solid #D8232A", borderRadius: 20, padding: "1px 6px", marginLeft: 6 },
   qtyInput: { width: 44, padding: "5px 6px", border: "1px solid #E4E2DC", borderRadius: 4, textAlign: "center" },
   iconBtn: { border: "none", background: "transparent", color: "#8A8A85", cursor: "pointer" },
   empty: { fontSize: 13, color: "#8A8A85", padding: "10px 0" },
