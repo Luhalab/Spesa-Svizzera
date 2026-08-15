@@ -1,5 +1,6 @@
 // Trova i negozi Migros / Coop / Denner / Aldi più vicini usando
 // OpenStreetMap tramite Overpass API — dati pubblici, nessuna chiave richiesta.
+// (Overpass risponde in genere in meno di un secondo, non serve un timeout esteso.)
 
 const BRANDS = {
   migros: "Migros",
