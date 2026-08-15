@@ -1,16 +1,21 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { ShoppingCart, MapPin, X, TrendingDown, ArrowLeft, ArrowRight, Loader2 } from "lucide-react";
-import { CHAINS } from "../lib/demoCatalog";
+import { CHAINS, CITIES } from "../lib/demoCatalog";
 
 const money = (v) => (v == null ? "—" : `CHF ${v.toFixed(2)}`);
 
+// Se NEXT_PUBLIC_BACKEND_URL è impostato (backend Railway/Render sempre acceso),
+// lo usiamo per avere prezzi reali. Altrimenti si torna alla funzione serverless
+// di Vercel /api/search, che ha il fallback ai dati demo.
+const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "";
+
 export default function Home() {
   const [step, setStep] = useState("lista");
-  const [list, setList] = useState([]); // [{ id, name, unit, qty, prices, source }]
+  const [list, setList] = useState([]);
   const [query, setQuery] = useState("");
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState("");
-  const [postalCode, setPostalCode] = useState("8000");
+  const [city, setCity] = useState("Zurigo");
   const [stores, setStores] = useState(null);
   const [loadingStores, setLoadingStores] = useState(false);
 
@@ -20,7 +25,10 @@ export default function Home() {
     setSearching(true);
     setSearchError("");
     try {
-      const res = await fetch(`/api/search?q=${encodeURIComponent(term)}`);
+      const url = BACKEND_URL
+        ? `${BACKEND_URL}/search?q=${encodeURIComponent(term)}`
+        : `/api/search?q=${encodeURIComponent(term)}`;
+      const res = await fetch(url);
       const data = await res.json();
       if (!data.results || data.results.length === 0) {
         setSearchError(`Nessun prodotto trovato per "${term}"`);
@@ -63,23 +71,40 @@ export default function Home() {
   const cheapest =
     fullyAvailable.length > 0 ? fullyAvailable.reduce((a, b) => (b.total < a.total ? b : a)) : null;
 
-  const loadStores = async () => {
+  const multiStoreTotal = list.reduce((sum, { qty, prices }) => {
+    const vals = CHAINS.map((c) => prices?.[c.id]).filter((v) => v != null);
+    if (vals.length === 0) return sum;
+    return sum + Math.min(...vals) * qty;
+  }, 0);
+  const savings = cheapest ? cheapest.total - multiStoreTotal : 0;
+
+  const loadStores = async (cityName) => {
     setLoadingStores(true);
+    const coords = CITIES[cityName];
     try {
-      // Geocoding CAP → lat/lng semplificato: in produzione usare una tabella
-      // CAP svizzeri reale (swissgroceries-mcp include già questa lookup).
-      const res = await fetch(`/api/stores?lat=47.3769&lng=8.5417`);
+      const res = await fetch(`/api/stores?lat=${coords.lat}&lng=${coords.lng}`);
       const data = await res.json();
-      setStores(data.stores || []);
+      setStores(data.nearestByChain || null);
     } catch {
-      setStores([]);
+      setStores(null);
     } finally {
       setLoadingStores(false);
     }
   };
 
+  useEffect(() => {
+    if (step === "risultato") loadStores(city);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step]);
+
   return (
     <div style={styles.page}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Mono:wght@400;600&family=Inter:wght@400;500;600&display=swap');
+        * { box-sizing: border-box; }
+        body { margin: 0; background: #FAFAF7; }
+      `}</style>
+
       <header style={styles.header}>
         <div style={styles.brandRow}>
           <div style={styles.brandMark}>CH</div>
@@ -104,17 +129,18 @@ export default function Home() {
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-                placeholder="Cerca un prodotto reale (es. latte)"
+                placeholder="Cerca un prodotto (es. olio, latte…)"
                 style={styles.textInput}
               />
               <button onClick={handleSearch} style={styles.addBtn} disabled={searching}>
-                {searching ? <Loader2 size={16} className="spin" /> : "+"}
+                {searching ? "…" : "+"}
               </button>
             </div>
             {searchError && <div style={styles.errorText}>{searchError}</div>}
             <div style={styles.footnoteSmall}>
-              La ricerca chiama /api/search, che interroga swissgroceries-mcp in tempo reale
-              (con fallback ai dati demo se non configurato — vedi README).
+              {BACKEND_URL
+                ? "Ricerca collegata al backend reale."
+                : "Backend non ancora collegato: ricerca in modalità demo (vedi README, sezione 3)."}
             </div>
 
             <ul style={styles.list}>
@@ -143,10 +169,7 @@ export default function Home() {
 
             <button
               disabled={list.length === 0}
-              onClick={() => {
-                setStep("risultato");
-                loadStores();
-              }}
+              onClick={() => setStep("risultato")}
               style={{ ...styles.primaryBtn, opacity: list.length === 0 ? 0.4 : 1 }}
             >
               Vedi confronto prezzi <ArrowRight size={16} />
@@ -173,39 +196,64 @@ export default function Home() {
                       {isCheapest && <span style={styles.badge}>più economico</span>}
                     </div>
                     <div style={styles.chainTotal}>{t.missing > 0 ? "—" : money(t.total)}</div>
+                    {t.missing > 0 && <div style={styles.warn}>{t.missing} prodotto/i non disponibile/i</div>}
                   </div>
                 );
               })}
             </div>
+
+            {list.length > 0 && (
+              <div style={styles.multiBox}>
+                <div style={styles.multiTop}>Comprando ogni prodotto dove costa meno</div>
+                <div style={styles.multiRow}>
+                  <span style={styles.multiTotal}>{money(multiStoreTotal)}</span>
+                  {cheapest && savings > 0.01 && (
+                    <span style={styles.multiSave}>risparmi {money(savings)} rispetto a {cheapest.name} da solo</span>
+                  )}
+                </div>
+              </div>
+            )}
           </section>
 
           <section style={styles.panel}>
             <div style={styles.panelHead}>
               <MapPin size={18} />
-              <span style={styles.panelTitle}>Negozi vicini</span>
+              <span style={styles.panelTitle}>Negozio più vicino</span>
             </div>
-            <div style={styles.inlineRow}>
-              <input
-                value={postalCode}
-                onChange={(e) => setPostalCode(e.target.value)}
-                placeholder="CAP (es. 8000)"
-                style={styles.textInput}
-              />
-              <button onClick={loadStores} style={styles.addBtn}>
-                {loadingStores ? <Loader2 size={16} /> : "→"}
-              </button>
-            </div>
-            <ul style={styles.storeList}>
-              {(stores || []).slice(0, 6).map((s) => (
-                <li key={s.id} style={styles.storeItem}>
-                  <div style={{ flex: 1 }}>{s.name}</div>
-                  <div style={styles.storeKm}>{s.distanceKm.toFixed(1)} km</div>
-                </li>
+
+            <select
+              value={city}
+              onChange={(e) => {
+                setCity(e.target.value);
+                loadStores(e.target.value);
+              }}
+              style={styles.select}
+            >
+              {Object.keys(CITIES).map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
               ))}
+            </select>
+
+            {loadingStores && <div style={styles.footnoteSmall}>Cerco i negozi vicini…</div>}
+
+            <ul style={styles.storeList}>
+              {CHAINS.map((chain) => {
+                const s = stores?.[chain.id];
+                return (
+                  <li key={chain.id} style={styles.storeItem}>
+                    <span style={{ ...styles.dot, background: chain.color }} />
+                    <div style={{ flex: 1 }}>
+                      <div style={styles.storeName}>{s ? s.name : "Nessun negozio trovato nel raggio"}</div>
+                      <div style={styles.storeChain}>{chain.name}</div>
+                    </div>
+                    {s && <div style={styles.storeKm}>{s.distanceKm.toFixed(1)} km</div>}
+                  </li>
+                );
+              })}
             </ul>
-            <div style={styles.footnoteSmall}>
-              Dati reali da OpenStreetMap / Overpass API — nessuna chiave richiesta.
-            </div>
+            <div style={styles.footnoteSmall}>Dati reali da OpenStreetMap / Overpass API.</div>
           </section>
 
           <button onClick={() => setStep("lista")} style={styles.backBtn}>
@@ -218,7 +266,7 @@ export default function Home() {
 }
 
 const styles = {
-  page: { minHeight: "100vh", paddingBottom: 40 },
+  page: { minHeight: "100vh", paddingBottom: 40, color: "#1A1A1A", fontFamily: "'Inter', sans-serif" },
   header: { borderBottom: "1px solid #E4E2DC", padding: "28px 24px 20px" },
   brandRow: { display: "flex", alignItems: "center", gap: 14 },
   brandMark: {
@@ -238,6 +286,7 @@ const styles = {
   textInput: { flex: 1, padding: "10px 12px", border: "1px solid #E4E2DC", borderRadius: 4, fontSize: 13.5 },
   addBtn: { width: 40, border: "1px solid #1A1A1A", background: "#1A1A1A", color: "#FAFAF7", borderRadius: 4, cursor: "pointer" },
   errorText: { fontSize: 11.5, color: "#B0392B", marginBottom: 8 },
+  select: { width: "100%", padding: "10px 12px", border: "1px solid #E4E2DC", borderRadius: 4, fontSize: 13.5, marginBottom: 12 },
   footnoteSmall: { fontSize: 11, color: "#8A8A85", marginBottom: 12, lineHeight: 1.5 },
   list: { listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 8 },
   listItem: { display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: "1px solid #F0EEE8" },
@@ -255,7 +304,15 @@ const styles = {
   chainName: { fontSize: 13.5, fontWeight: 600, flex: 1 },
   badge: { fontSize: 10, color: "#3F7D5C", border: "1px solid #3F7D5C", borderRadius: 20, padding: "2px 7px" },
   chainTotal: { fontFamily: "'IBM Plex Mono', monospace", fontSize: 20, fontWeight: 600 },
+  warn: { fontSize: 11, color: "#B08900", marginTop: 4 },
+  multiBox: { marginTop: 16, padding: 14, background: "#F4F1EA", borderRadius: 4 },
+  multiTop: { fontSize: 12, color: "#5A5850", marginBottom: 6 },
+  multiRow: { display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" },
+  multiTotal: { fontFamily: "'IBM Plex Mono', monospace", fontSize: 20, fontWeight: 700, color: "#D8232A" },
+  multiSave: { fontSize: 12, color: "#3F7D5C" },
   storeList: { listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 8 },
-  storeItem: { display: "flex", padding: "6px 0", borderBottom: "1px solid #F0EEE8", fontSize: 13 },
+  storeItem: { display: "flex", alignItems: "center", gap: 10, padding: "6px 0", borderBottom: "1px solid #F0EEE8", fontSize: 13 },
+  storeName: { fontSize: 13, fontWeight: 500 },
+  storeChain: { fontSize: 11, color: "#8A8A85" },
   storeKm: { fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, color: "#5A5850" },
 };
