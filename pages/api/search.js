@@ -1,5 +1,5 @@
 import { searchProducts } from "../../lib/mcpClient";
-import { DEMO_CATALOG } from "../../lib/demoCatalog";
+import { findDemoProduct } from "../../lib/demoCatalog";
 
 export default async function handler(req, res) {
   const { q } = req.query;
@@ -15,13 +15,11 @@ export default async function handler(req, res) {
     // Fallback: dati demo, così l'app resta utilizzabile anche se
     // l'integrazione MCP non è ancora configurata o è irraggiungibile.
     console.error("swissgroceries-mcp non disponibile, uso i dati demo:", err.message);
-    const match = DEMO_CATALOG.find((p) =>
-      p.name.toLowerCase().includes(q.trim().toLowerCase())
-    );
+    const match = findDemoProduct(q.trim());
     return res.status(200).json({
       source: "demo",
       results: match ? [match] : [],
-      warning: "Dati demo: configura swissgroceries-mcp per i prezzi reali (vedi README).",
+      warning: "Dati demo: configura il backend (vedi README) per i prezzi reali.",
     });
   }
 }

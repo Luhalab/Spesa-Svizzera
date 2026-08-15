@@ -1,7 +1,7 @@
 // Trova i negozi Migros / Coop / Denner / Aldi più vicini usando
 // OpenStreetMap tramite Overpass API — dati pubblici, nessuna chiave richiesta.
 
-const BRAND_TAGS = {
+const BRANDS = {
   migros: "Migros",
   coop: "Coop",
   denner: "Denner",
@@ -9,12 +9,12 @@ const BRAND_TAGS = {
 };
 
 export default async function handler(req, res) {
-  const { lat, lng, radius = 3000 } = req.query;
+  const { lat, lng, radius = 5000 } = req.query;
   if (!lat || !lng) {
     return res.status(400).json({ error: "Parametri 'lat' e 'lng' mancanti" });
   }
 
-  const brandFilter = Object.values(BRAND_TAGS)
+  const brandFilter = Object.values(BRANDS)
     .map((b) => `node["shop"~"supermarket|convenience"]["name"~"${b}",i](around:${radius},${lat},${lng});`)
     .join("\n");
 
@@ -28,16 +28,25 @@ export default async function handler(req, res) {
     });
     const data = await response.json();
 
-    const stores = (data.elements || []).map((el) => ({
-      id: el.id,
-      name: el.tags?.name || "Negozio",
-      lat: el.lat,
-      lng: el.lon,
-      distanceKm: haversine(lat, lng, el.lat, el.lon),
-    }));
+    const stores = (data.elements || [])
+      .filter((el) => el.tags?.name)
+      .map((el) => ({
+        id: el.id,
+        name: el.tags.name,
+        lat: el.lat,
+        lng: el.lon,
+        distanceKm: haversine(lat, lng, el.lat, el.lon),
+      }));
 
     stores.sort((a, b) => a.distanceKm - b.distanceKm);
-    return res.status(200).json({ stores });
+
+    // Negozio più vicino per ciascuna delle 4 catene
+    const nearestByChain = {};
+    Object.entries(BRANDS).forEach(([id, brand]) => {
+      nearestByChain[id] = stores.find((s) => s.name.toLowerCase().includes(brand.toLowerCase())) || null;
+    });
+
+    return res.status(200).json({ stores, nearestByChain });
   } catch (err) {
     console.error("Errore Overpass API:", err.message);
     return res.status(502).json({ error: "Overpass API non raggiungibile" });
