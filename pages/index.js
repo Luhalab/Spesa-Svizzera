@@ -23,7 +23,9 @@ export default function Home() {
       const res = await fetch(`/api/search?q=${encodeURIComponent(term)}`);
       const data = await res.json();
       if (!data.results || data.results.length === 0) {
-        setSearchError(`Nessun prodotto trovato per "${term}"`);
+        setSearchError(
+          data.debug ? `Nessun prodotto trovato per "${term}" (errore live: ${data.debug})` : `Nessun prodotto trovato per "${term}"`
+        );
         return;
       }
       const product = data.results[0];
