@@ -1,4 +1,4 @@
-import { searchProducts, getPromotions, resetClient } from "../../lib/mcpClient";
+import { searchProducts, getPromotions } from "../../lib/mcpClient";
 import { findDemoProduct } from "../../lib/demoCatalog";
 
 // Cerca più termini in una sola richiesta, riusando la stessa connessione a
@@ -11,26 +11,12 @@ export const config = {
 
 const TARGET_CHAINS = ["migros", "coop"];
 
-// Coop a volte non risponde alla prima richiesta (probabile protezione
-// anti-bot lato Coop). Se torna vuoto, riproviamo una volta dopo una breve
-// pausa prima di arrenderci — spesso basta.
-async function searchWithRetry(term) {
-  let byChain = (await searchProducts(term))?.byChain || {};
-  const coopEmpty = !Array.isArray(byChain?.coop) || byChain.coop.length === 0;
-
-  if (coopEmpty) {
-    resetClient(); // scarta la connessione attuale, la prossima chiamata ne apre una nuova
-    await new Promise((r) => setTimeout(r, 500));
-    try {
-      const retryByChain = (await searchProducts(term))?.byChain;
-      if (Array.isArray(retryByChain?.coop) && retryByChain.coop.length > 0) {
-        byChain = { ...byChain, coop: retryByChain.coop };
-      }
-    } catch {
-      // Se anche il secondo tentativo fallisce, teniamo il risultato originale.
-    }
-  }
-  return byChain;
+// Una sola richiesta pulita per termine, senza retry immediati: due
+// richieste ravvicinate hanno il profilo tipico di un bot agli occhi della
+// protezione anti-bot di Coop (DataDome) e possono peggiorare il blocco
+// invece di aggirarlo. Meglio una richiesta sola, senza fretta.
+async function searchOnce(term) {
+  return (await searchProducts(term))?.byChain || {};
 }
 
 function candidatesForChain(byChain, chainId, limit = 8) {
@@ -62,12 +48,17 @@ export default async function handler(req, res) {
   const items = [];
   let source = "live";
 
-  for (const rawTerm of terms) {
-    const term = String(rawTerm).trim();
+  for (let i = 0; i < terms.length; i++) {
+    const term = String(terms[i]).trim();
     if (!term) continue;
 
+    // Pausa tra un prodotto e l'altro (non prima del primo): richieste
+    // ravvicinate hanno un profilo "da bot" agli occhi della protezione
+    // anti-bot di Coop, molto più di richieste isolate e distanziate.
+    if (i > 0) await new Promise((r) => setTimeout(r, 1500));
+
     try {
-      const byChain = await searchWithRetry(term);
+      const byChain = await searchOnce(term);
       if (!byChain) throw new Error("Formato risposta inatteso");
 
       const candidates = {};
