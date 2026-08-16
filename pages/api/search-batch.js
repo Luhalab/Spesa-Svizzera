@@ -1,4 +1,4 @@
-import { searchProducts, getPromotions } from "../../lib/mcpClient";
+import { searchProducts, getPromotions, resetClient } from "../../lib/mcpClient";
 import { findDemoProduct } from "../../lib/demoCatalog";
 
 // Cerca più termini in una sola richiesta, riusando la stessa connessione a
@@ -19,7 +19,8 @@ async function searchWithRetry(term) {
   const coopEmpty = !Array.isArray(byChain?.coop) || byChain.coop.length === 0;
 
   if (coopEmpty) {
-    await new Promise((r) => setTimeout(r, 1000));
+    resetClient(); // scarta la connessione attuale, la prossima chiamata ne apre una nuova
+    await new Promise((r) => setTimeout(r, 500));
     try {
       const retryByChain = (await searchProducts(term))?.byChain;
       if (Array.isArray(retryByChain?.coop) && retryByChain.coop.length > 0) {
