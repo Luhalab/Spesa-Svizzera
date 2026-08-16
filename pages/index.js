@@ -259,6 +259,9 @@ export default function Home() {
                       {chain.name}
                       <span style={styles.selCount}>
                         {cands.length === 0 ? "nessun risultato" : `${cands.length} trovato/i`}
+                        {r.rawCounts && r.rawCounts[chain.id] !== cands.length && (
+                          <> (grezzo: {r.rawCounts[chain.id]})</>
+                        )}
                       </span>
                     </div>
                     {cands.length === 0 ? (
