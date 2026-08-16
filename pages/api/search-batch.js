@@ -11,6 +11,27 @@ export const config = {
 
 const TARGET_CHAINS = ["migros", "coop"];
 
+// Coop a volte non risponde alla prima richiesta (probabile protezione
+// anti-bot lato Coop). Se torna vuoto, riproviamo una volta dopo una breve
+// pausa prima di arrenderci — spesso basta.
+async function searchWithRetry(term) {
+  let byChain = (await searchProducts(term))?.byChain || {};
+  const coopEmpty = !Array.isArray(byChain?.coop) || byChain.coop.length === 0;
+
+  if (coopEmpty) {
+    await new Promise((r) => setTimeout(r, 1000));
+    try {
+      const retryByChain = (await searchProducts(term))?.byChain;
+      if (Array.isArray(retryByChain?.coop) && retryByChain.coop.length > 0) {
+        byChain = { ...byChain, coop: retryByChain.coop };
+      }
+    } catch {
+      // Se anche il secondo tentativo fallisce, teniamo il risultato originale.
+    }
+  }
+  return byChain;
+}
+
 function candidatesForChain(byChain, chainId, limit = 8) {
   const list = Array.isArray(byChain?.[chainId]) ? byChain[chainId] : [];
   const seen = new Set();
@@ -45,8 +66,7 @@ export default async function handler(req, res) {
     if (!term) continue;
 
     try {
-      const byChainResult = await searchProducts(term);
-      const byChain = byChainResult?.byChain;
+      const byChain = await searchWithRetry(term);
       if (!byChain) throw new Error("Formato risposta inatteso");
 
       const candidates = {};
