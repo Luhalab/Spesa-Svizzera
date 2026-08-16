@@ -5,6 +5,8 @@
 const BRANDS = {
   migros: "Migros",
   coop: "Coop",
+  denner: "Denner",
+  ottos: "Otto's",
 };
 
 export default async function handler(req, res) {
@@ -14,7 +16,10 @@ export default async function handler(req, res) {
   }
 
   const brandFilter = Object.values(BRANDS)
-    .map((b) => `node["shop"~"supermarket|convenience"]["name"~"${b}",i](around:${radius},${lat},${lng});`)
+    .map(
+      (b) =>
+        `node["shop"~"supermarket|convenience|variety_store|department_store"]["name"~"${b}",i](around:${radius},${lat},${lng});`
+    )
     .join("\n");
 
   const query = `[out:json][timeout:15];(${brandFilter});out body;`;
