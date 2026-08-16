@@ -40,8 +40,13 @@ function candidatesForChain(byChain, chainId, limit = 8) {
 }
 
 export default async function handler(req, res) {
-  const terms = Array.isArray(req.body?.terms) ? req.body.terms : [];
-  if (terms.length === 0) {
+  const terms =
+    req.method === "GET"
+      ? [String(req.query.q || "")]
+      : Array.isArray(req.body?.terms)
+      ? req.body.terms
+      : [];
+  if (terms.length === 0 || !terms[0]) {
     return res.status(400).json({ error: "Nessun termine da cercare" });
   }
 
@@ -68,7 +73,14 @@ export default async function handler(req, res) {
         rawCounts[chainId] = rawList.length;
         candidates[chainId] = candidatesForChain(byChain, chainId);
       });
-      items.push({ term, candidates, rawCounts, raw: true });
+      // Debug temporaneo: le chiavi presenti nella risposta grezza e un
+      // campione del primo elemento Coop (se c'è), per vedere la verità
+      // invece di continuare a ipotizzare.
+      const debug = {
+        byChainKeys: Object.keys(byChain || {}),
+        coopRawSample: Array.isArray(byChain?.coop) ? byChain.coop.slice(0, 1) : byChain?.coop,
+      };
+      items.push({ term, candidates, rawCounts, debug, raw: true });
     } catch (err) {
       console.error(`Ricerca live fallita per "${term}", uso demo:`, err.message);
       source = "demo";
