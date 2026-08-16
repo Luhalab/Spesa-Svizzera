@@ -9,7 +9,7 @@ export const config = {
   maxDuration: 60,
 };
 
-const TARGET_CHAINS = ["migros", "coop"];
+const TARGET_CHAINS = ["migros", "coop", "denner", "ottos"];
 
 // Una sola richiesta pulita per termine, senza retry immediati: due
 // richieste ravvicinate hanno il profilo tipico di un bot agli occhi della
