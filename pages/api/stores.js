@@ -5,8 +5,6 @@
 const BRANDS = {
   migros: "Migros",
   coop: "Coop",
-  denner: "Denner",
-  aldi: "Aldi",
 };
 
 export default async function handler(req, res) {
