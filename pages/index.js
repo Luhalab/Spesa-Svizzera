@@ -15,6 +15,8 @@ import {
 const CHAINS = [
   { id: "migros", name: "Migros", color: "#FF8A3D" },
   { id: "coop", name: "Coop", color: "#FF5A5F" },
+  { id: "denner", name: "Denner", color: "#4A90E2" },
+  { id: "ottos", name: "Otto's", color: "#4DBD9E" },
 ];
 
 const WINTERTHUR = { lat: 47.5, lng: 8.75 };
@@ -83,10 +85,11 @@ export default function Home() {
       // Preseleziona il più economico per ogni catena, dove disponibile
       const initSel = {};
       results.forEach((r) => {
-        initSel[r.term] = {
-          migros: r.candidates.migros.length > 0 ? 0 : null,
-          coop: r.candidates.coop.length > 0 ? 0 : null,
-        };
+        const sel = {};
+        CHAINS.forEach((c) => {
+          sel[c.id] = r.candidates[c.id]?.length > 0 ? 0 : null;
+        });
+        initSel[r.term] = sel;
       });
       setSelections(initSel);
       setStep("seleziona");
@@ -106,16 +109,15 @@ export default function Home() {
 
   const confirmSelection = () => {
     const finalItems = searchResults.map((r) => {
-      const selMigros = selections[r.term]?.migros;
-      const selCoop = selections[r.term]?.coop;
-      const cMigros = selMigros != null ? r.candidates.migros[selMigros] : null;
-      const cCoop = selCoop != null ? r.candidates.coop[selCoop] : null;
-      const name = cMigros?.name || cCoop?.name || r.term;
-      return {
-        term: r.term,
-        name,
-        prices: { migros: cMigros?.price ?? null, coop: cCoop?.price ?? null },
-      };
+      const prices = {};
+      let name = r.term;
+      CHAINS.forEach((c) => {
+        const selIdx = selections[r.term]?.[c.id];
+        const chosen = selIdx != null ? r.candidates[c.id][selIdx] : null;
+        prices[c.id] = chosen?.price ?? null;
+        if (chosen?.name && name === r.term) name = chosen.name;
+      });
+      return { term: r.term, name, prices };
     });
     setItems(finalItems);
     setStep("risultato");
@@ -135,13 +137,20 @@ export default function Home() {
     }
   };
 
-  const comparableItems = items.filter((i) => i.prices.migros != null && i.prices.coop != null);
+  const comparableItems = items.filter((i) => CHAINS.every((c) => i.prices[c.id] != null));
   const totals = CHAINS.reduce((acc, c) => {
     acc[c.id] = comparableItems.reduce((sum, i) => sum + (i.prices[c.id] || 0), 0);
     return acc;
   }, {});
+  const totalsList = CHAINS.map((c) => ({ id: c.id, name: c.name, total: totals[c.id] }));
   const cheapestChain =
-    comparableItems.length > 0 ? (totals.migros <= totals.coop ? "migros" : "coop") : null;
+    comparableItems.length > 0
+      ? totalsList.reduce((a, b) => (b.total < a.total ? b : a)).id
+      : null;
+  const priciestTotal =
+    comparableItems.length > 0 ? Math.max(...totalsList.map((t) => t.total)) : null;
+  const cheapestTotal =
+    comparableItems.length > 0 ? Math.min(...totalsList.map((t) => t.total)) : null;
 
   return (
     <div style={styles.page}>
@@ -156,7 +165,7 @@ export default function Home() {
         <div style={styles.brandRow}>
           <div style={styles.brandMark}>W</div>
           <div>
-            <div style={styles.eyebrow}>Migros vs Coop · Winterthur</div>
+            <div style={styles.eyebrow}>Migros · Coop · Denner · Otto's · Winterthur</div>
             <h1 style={styles.h1}>
               {step === "lista" && "Costruisci la lista"}
               {step === "seleziona" && "Scegli i prodotti giusti"}
@@ -327,21 +336,27 @@ export default function Home() {
                 <thead>
                   <tr>
                     <th style={styles.thProduct}>Prodotto</th>
-                    <th style={styles.th}>Migros</th>
-                    <th style={styles.th}>Coop</th>
+                    {CHAINS.map((c) => (
+                      <th key={c.id} style={styles.th}>
+                        {c.name}
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
                   {items.map((item, i) => {
-                    const excluded = item.prices.migros == null || item.prices.coop == null;
+                    const excluded = CHAINS.some((c) => item.prices[c.id] == null);
                     return (
                       <tr key={i} style={excluded ? styles.trExcluded : undefined}>
                         <td style={styles.tdProduct}>
                           {item.name}
                           {excluded && <div style={styles.excludedNote}>escluso dal totale</div>}
                         </td>
-                        <td style={styles.td}>{money(item.prices.migros)}</td>
-                        <td style={styles.td}>{money(item.prices.coop)}</td>
+                        {CHAINS.map((c) => (
+                          <td key={c.id} style={styles.td}>
+                            {money(item.prices[c.id])}
+                          </td>
+                        ))}
                       </tr>
                     );
                   })}
@@ -349,12 +364,14 @@ export default function Home() {
                 <tfoot>
                   <tr>
                     <td style={styles.tdTotalLabel}>Totale</td>
-                    <td style={{ ...styles.tdTotal, color: cheapestChain === "migros" ? "#7CD98A" : "#E8E6DE" }}>
-                      {comparableItems.length > 0 ? money(totals.migros) : "—"}
-                    </td>
-                    <td style={{ ...styles.tdTotal, color: cheapestChain === "coop" ? "#7CD98A" : "#E8E6DE" }}>
-                      {comparableItems.length > 0 ? money(totals.coop) : "—"}
-                    </td>
+                    {CHAINS.map((c) => (
+                      <td
+                        key={c.id}
+                        style={{ ...styles.tdTotal, color: cheapestChain === c.id ? "#7CD98A" : "#E8E6DE" }}
+                      >
+                        {comparableItems.length > 0 ? money(totals[c.id]) : "—"}
+                      </td>
+                    ))}
                   </tr>
                 </tfoot>
               </table>
@@ -363,9 +380,12 @@ export default function Home() {
             {cheapestChain && (
               <div style={styles.verdictBox}>
                 <div style={styles.verdictLabel}>Conviene andare da</div>
-                <div style={styles.verdictStore}>{cheapestChain === "migros" ? "Migros" : "Coop"}</div>
+                <div style={styles.verdictStore}>
+                  {CHAINS.find((c) => c.id === cheapestChain)?.name}
+                </div>
                 <div style={styles.verdictSaving}>
-                  risparmi {money(Math.abs(totals.migros - totals.coop))} rispetto all'altro negozio
+                  risparmi {money(priciestTotal - cheapestTotal)} rispetto al negozio più caro tra
+                  quelli confrontati
                   {items.length > comparableItems.length && (
                     <> · {items.length - comparableItems.length} prodotto/i escluso/i dal calcolo</>
                   )}
