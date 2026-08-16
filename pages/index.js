@@ -9,6 +9,7 @@ import {
   ClipboardPaste,
   Check,
   Loader2,
+  CircleSlash,
 } from "lucide-react";
 
 const CHAINS = [
@@ -16,7 +17,6 @@ const CHAINS = [
   { id: "coop", name: "Coop", color: "#FF5A5F" },
 ];
 
-// Coordinate centro Winterthur, per i negozi vicini via Overpass API
 const WINTERTHUR = { lat: 47.5, lng: 8.75 };
 
 const money = (v) => (v == null ? "—" : `CHF ${v.toFixed(2)}`);
@@ -27,17 +27,19 @@ const parseNoteLine = (line) => {
 };
 
 export default function Home() {
-  const [step, setStep] = useState("lista"); // "lista" | "risultato"
-  const [pending, setPending] = useState([]); // termini da cercare, non ancora interrogati
+  const [step, setStep] = useState("lista"); // "lista" | "seleziona" | "risultato"
+  const [pending, setPending] = useState([]);
   const [manualInput, setManualInput] = useState("");
   const [showImport, setShowImport] = useState(false);
   const [noteText, setNoteText] = useState("");
 
   const [searching, setSearching] = useState(false);
   const [searchErr, setSearchErr] = useState("");
-  const [items, setItems] = useState([]); // risultati dopo la query
+  const [searchResults, setSearchResults] = useState([]); // [{term, candidates:{migros:[],coop:[]}}]
+  const [selections, setSelections] = useState({}); // { term: { migros: idx|null, coop: idx|null } }
   const [source, setSource] = useState(null);
 
+  const [items, setItems] = useState([]); // risultato finale confermato
   const [stores, setStores] = useState(null);
   const [loadingStores, setLoadingStores] = useState(false);
 
@@ -51,10 +53,7 @@ export default function Home() {
   const removeTerm = (i) => setPending((p) => p.filter((_, idx) => idx !== i));
 
   const importNote = () => {
-    const lines = noteText
-      .split("\n")
-      .map(parseNoteLine)
-      .filter(Boolean);
+    const lines = noteText.split("\n").map(parseNoteLine).filter(Boolean);
     setPending((p) => {
       const merged = [...p];
       lines.forEach((l) => {
@@ -77,15 +76,50 @@ export default function Home() {
         body: JSON.stringify({ terms: pending }),
       });
       const data = await res.json();
-      setItems(data.items || []);
+      const results = data.items || [];
+      setSearchResults(results);
       setSource(data.source);
-      setStep("risultato");
-      loadStores();
+
+      // Preseleziona il più economico per ogni catena, dove disponibile
+      const initSel = {};
+      results.forEach((r) => {
+        initSel[r.term] = {
+          migros: r.candidates.migros.length > 0 ? 0 : null,
+          coop: r.candidates.coop.length > 0 ? 0 : null,
+        };
+      });
+      setSelections(initSel);
+      setStep("seleziona");
     } catch (err) {
       setSearchErr("Errore di rete durante la ricerca. Riprova.");
     } finally {
       setSearching(false);
     }
+  };
+
+  const selectCandidate = (term, chainId, idx) => {
+    setSelections((s) => ({
+      ...s,
+      [term]: { ...s[term], [chainId]: s[term][chainId] === idx ? null : idx },
+    }));
+  };
+
+  const confirmSelection = () => {
+    const finalItems = searchResults.map((r) => {
+      const selMigros = selections[r.term]?.migros;
+      const selCoop = selections[r.term]?.coop;
+      const cMigros = selMigros != null ? r.candidates.migros[selMigros] : null;
+      const cCoop = selCoop != null ? r.candidates.coop[selCoop] : null;
+      const name = cMigros?.name || cCoop?.name || r.term;
+      return {
+        term: r.term,
+        name,
+        prices: { migros: cMigros?.price ?? null, coop: cCoop?.price ?? null },
+      };
+    });
+    setItems(finalItems);
+    setStep("risultato");
+    loadStores();
   };
 
   const loadStores = async () => {
@@ -101,8 +135,6 @@ export default function Home() {
     }
   };
 
-  // Righe della tabella: comparabili (in entrambi) contano nel totale,
-  // quelle presenti solo in un negozio compaiono comunque ma sono escluse.
   const comparableItems = items.filter((i) => i.prices.migros != null && i.prices.coop != null);
   const totals = CHAINS.reduce((acc, c) => {
     acc[c.id] = comparableItems.reduce((sum, i) => sum + (i.prices[c.id] || 0), 0);
@@ -118,7 +150,6 @@ export default function Home() {
         * { box-sizing: border-box; }
         body { margin: 0; background: #14140F; }
         textarea::placeholder, input::placeholder { color: #6B6A63; }
-        select { color-scheme: dark; }
       `}</style>
 
       <header style={styles.header}>
@@ -126,7 +157,11 @@ export default function Home() {
           <div style={styles.brandMark}>W</div>
           <div>
             <div style={styles.eyebrow}>Migros vs Coop · Winterthur</div>
-            <h1 style={styles.h1}>{step === "lista" ? "Costruisci la lista" : "Confronto prezzi"}</h1>
+            <h1 style={styles.h1}>
+              {step === "lista" && "Costruisci la lista"}
+              {step === "seleziona" && "Scegli i prodotti giusti"}
+              {step === "risultato" && "Confronto prezzi"}
+            </h1>
           </div>
         </div>
       </header>
@@ -145,7 +180,7 @@ export default function Home() {
                 value={manualInput}
                 onChange={(e) => setManualInput(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && addTerm()}
-                placeholder="es. olio, pasta Barilla, cetrioli…"
+                placeholder="es. olio, pasta, sale…"
                 style={styles.textInput}
               />
               <button onClick={addTerm} style={styles.addBtn}>
@@ -163,7 +198,7 @@ export default function Home() {
                 <textarea
                   value={noteText}
                   onChange={(e) => setNoteText(e.target.value)}
-                  placeholder={"Incolla qui la tua lista, un prodotto per riga\nes.\nolio\npasta barilla\ncetrioli"}
+                  placeholder={"Incolla qui la tua lista, un prodotto per riga"}
                   style={styles.textarea}
                   rows={5}
                 />
@@ -197,21 +232,82 @@ export default function Home() {
               onClick={runSearch}
               style={{ ...styles.primaryBtn, opacity: pending.length === 0 ? 0.4 : 1 }}
             >
-              {searching ? (
-                <>
-                  <Loader2 size={16} className="spin" /> Cerco i prezzi…
-                </>
-              ) : (
-                <>
-                  Cerca prezzi ({pending.length}) <ArrowRight size={16} />
-                </>
-              )}
+              {searching ? "Cerco i prezzi…" : `Cerca prezzi (${pending.length})`}
+              {!searching && <ArrowRight size={16} />}
             </button>
-            <div style={styles.footnoteSmall}>
-              La ricerca parte una sola volta per tutti i prodotti aggiunti, non ad ogni singolo
-              inserimento.
-            </div>
           </section>
+        </main>
+      )}
+
+      {step === "seleziona" && (
+        <main style={styles.mainSingle}>
+          {source === "demo" && (
+            <div style={styles.demoWarning}>
+              Alcuni risultati sono dati demo (la ricerca live non ha risposto per tutti).
+            </div>
+          )}
+          {searchResults.map((r) => (
+            <section key={r.term} style={styles.panel}>
+              <div style={styles.selTermTitle}>"{r.term}"</div>
+              {CHAINS.map((chain) => {
+                const cands = r.candidates[chain.id];
+                const selIdx = selections[r.term]?.[chain.id];
+                return (
+                  <div key={chain.id} style={styles.selChainBlock}>
+                    <div style={styles.selChainLabel}>
+                      <span style={{ ...styles.dot, background: chain.color }} />
+                      {chain.name}
+                      <span style={styles.selCount}>
+                        {cands.length === 0 ? "nessun risultato" : `${cands.length} trovato/i`}
+                      </span>
+                    </div>
+                    {cands.length === 0 ? (
+                      <div style={styles.selNone}>
+                        <CircleSlash size={13} /> Non trovato su {chain.name}
+                      </div>
+                    ) : (
+                      <div style={styles.selOptions}>
+                        {cands.map((c, idx) => (
+                          <button
+                            key={idx}
+                            onClick={() => selectCandidate(r.term, chain.id, idx)}
+                            style={{
+                              ...styles.selOption,
+                              ...(selIdx === idx ? styles.selOptionActive : {}),
+                            }}
+                          >
+                            <span style={{ flex: 1, textAlign: "left" }}>
+                              {c.name}
+                              {c.brand && <span style={styles.selBrand}> · {c.brand}</span>}
+                            </span>
+                            <span style={styles.selPrice}>{money(c.price)}</span>
+                          </button>
+                        ))}
+                        <button
+                          onClick={() => selectCandidate(r.term, chain.id, -1)}
+                          style={{
+                            ...styles.selOption,
+                            ...(selIdx == null ? styles.selOptionActive : {}),
+                            justifyContent: "center",
+                            color: "#8C8A80",
+                          }}
+                        >
+                          Nessuno di questi
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </section>
+          ))}
+
+          <button onClick={confirmSelection} style={styles.primaryBtn}>
+            Vedi confronto <ArrowRight size={16} />
+          </button>
+          <button onClick={() => setStep("lista")} style={styles.backBtn}>
+            <ArrowLeft size={16} /> Modifica lista
+          </button>
         </main>
       )}
 
@@ -222,12 +318,6 @@ export default function Home() {
               <TrendingDown size={18} />
               <span style={styles.panelTitle}>Tabella di confronto</span>
             </div>
-
-            {source === "demo" && (
-              <div style={styles.demoWarning}>
-                Alcuni prezzi sono dati demo (la ricerca live non ha risposto per tutti i prodotti).
-              </div>
-            )}
 
             <div style={styles.tableWrap}>
               <table style={styles.table}>
@@ -302,11 +392,10 @@ export default function Home() {
                 );
               })}
             </ul>
-            <div style={styles.footnoteSmall}>Dati reali da OpenStreetMap / Overpass API.</div>
           </section>
 
           <button onClick={() => setStep("lista")} style={styles.backBtn}>
-            <ArrowLeft size={16} /> Modifica lista
+            <ArrowLeft size={16} /> Nuova ricerca
           </button>
         </main>
       )}
@@ -322,7 +411,7 @@ const styles = {
   eyebrow: { fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, letterSpacing: 1, textTransform: "uppercase", color: "#8C8A80" },
   h1: { fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 21, margin: 0, color: "#F5F3EA" },
   main: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 20, padding: 24, maxWidth: 1000, margin: "0 auto" },
-  mainSingle: { padding: 24, maxWidth: 520, margin: "0 auto" },
+  mainSingle: { padding: 24, maxWidth: 520, margin: "0 auto", display: "flex", flexDirection: "column", gap: 14 },
   panel: { background: "#1C1C15", border: "1px solid #2A2A22", borderRadius: 6, padding: 18 },
   panelHead: { display: "flex", alignItems: "center", gap: 8, marginBottom: 16, paddingBottom: 12, borderBottom: "1px solid #2A2A22" },
   panelTitle: { fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 14, flex: 1, color: "#F5F3EA" },
@@ -339,9 +428,21 @@ const styles = {
   iconBtn: { border: "none", background: "transparent", color: "#8C8A80", cursor: "pointer" },
   empty: { fontSize: 13, color: "#6B6A63", padding: "10px 0" },
   errorText: { fontSize: 11.5, color: "#FF8A80", marginTop: 8 },
-  primaryBtn: { marginTop: 18, width: "100%", padding: "13px 16px", background: "#D8232A", color: "#F5F3EA", border: "none", borderRadius: 4, fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, cursor: "pointer" },
+  primaryBtn: { width: "100%", padding: "13px 16px", background: "#D8232A", color: "#F5F3EA", border: "none", borderRadius: 4, fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, cursor: "pointer" },
   footnoteSmall: { fontSize: 11, color: "#6B6A63", marginTop: 10, lineHeight: 1.5 },
-  demoWarning: { fontSize: 11.5, color: "#E0B84D", background: "#2A2410", padding: "8px 10px", borderRadius: 4, marginBottom: 12 },
+  demoWarning: { fontSize: 11.5, color: "#E0B84D", background: "#2A2410", padding: "8px 10px", borderRadius: 4 },
+  selTermTitle: { fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 15, marginBottom: 12, color: "#F5F3EA" },
+  selChainBlock: { marginBottom: 14 },
+  selChainLabel: { display: "flex", alignItems: "center", gap: 7, fontSize: 12.5, fontWeight: 600, marginBottom: 6 },
+  selCount: { marginLeft: "auto", fontSize: 10.5, color: "#8C8A80", fontWeight: 400 },
+  selNone: { display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#8C8A80", padding: "8px 10px", background: "#22221A", borderRadius: 4 },
+  selOptions: { display: "flex", flexDirection: "column", gap: 5 },
+  selOption: { display: "flex", alignItems: "center", gap: 8, padding: "9px 10px", background: "#22221A", border: "1px solid #3A3A30", borderRadius: 4, color: "#C9C7BC", fontSize: 12.5, cursor: "pointer", textAlign: "left" },
+  selOptionActive: { borderColor: "#3F7D5C", background: "#16241A", color: "#F5F3EA" },
+  selBrand: { color: "#8C8A80", fontStyle: "italic" },
+  selPrice: { fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600 },
+  dot: { width: 9, height: 9, borderRadius: "50%", flexShrink: 0 },
+  backBtn: { padding: "10px 16px", background: "transparent", border: "1px solid #3A3A30", borderRadius: 4, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, cursor: "pointer", color: "#E8E6DE" },
   tableWrap: { overflowX: "auto" },
   table: { width: "100%", borderCollapse: "collapse", fontSize: 13 },
   thProduct: { textAlign: "left", padding: "8px 6px", borderBottom: "1px solid #3A3A30", color: "#8C8A80", fontWeight: 600, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5 },
@@ -358,9 +459,7 @@ const styles = {
   verdictSaving: { fontSize: 12, color: "#B0AEA2" },
   storeList: { listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 8 },
   storeItem: { display: "flex", alignItems: "center", gap: 10, padding: "6px 0", borderBottom: "1px solid #22221A", fontSize: 13 },
-  dot: { width: 9, height: 9, borderRadius: "50%", flexShrink: 0 },
   storeName: { fontSize: 13, fontWeight: 500 },
   storeChain: { fontSize: 11, color: "#8C8A80" },
   storeKm: { fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, color: "#B0AEA2" },
-  backBtn: { gridColumn: "1 / -1", justifySelf: "start", padding: "10px 16px", background: "transparent", border: "1px solid #3A3A30", borderRadius: 4, display: "flex", alignItems: "center", gap: 8, cursor: "pointer", color: "#E8E6DE" },
 };
