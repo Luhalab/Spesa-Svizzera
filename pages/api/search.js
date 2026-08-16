@@ -31,6 +31,7 @@ export default async function handler(req, res) {
       source: "demo",
       results: match ? [match] : [],
       warning: "Dati demo: la ricerca live non ha risposto in tempo.",
+      debug: err.message,
     });
   }
 }
