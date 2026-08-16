@@ -1,83 +1,97 @@
-import React, { useState, useEffect } from "react";
-import { ShoppingCart, MapPin, X, TrendingDown, ArrowLeft, ArrowRight, Loader2 } from "lucide-react";
-import { CHAINS, CITIES } from "../lib/demoCatalog";
+import React, { useState } from "react";
+import {
+  ShoppingCart,
+  MapPin,
+  X,
+  TrendingDown,
+  ArrowLeft,
+  ArrowRight,
+  ClipboardPaste,
+  Check,
+  Loader2,
+} from "lucide-react";
+
+const CHAINS = [
+  { id: "migros", name: "Migros", color: "#FF8A3D" },
+  { id: "coop", name: "Coop", color: "#FF5A5F" },
+];
+
+// Coordinate centro Winterthur, per i negozi vicini via Overpass API
+const WINTERTHUR = { lat: 47.5, lng: 8.75 };
 
 const money = (v) => (v == null ? "—" : `CHF ${v.toFixed(2)}`);
 
+const parseNoteLine = (line) => {
+  const clean = line.replace(/^[\s\-\*•\u2022\u2610\u2611\[\]xX\d]+/, "").trim();
+  return clean || line.trim();
+};
+
 export default function Home() {
-  const [step, setStep] = useState("lista");
-  const [list, setList] = useState([]);
-  const [query, setQuery] = useState("");
+  const [step, setStep] = useState("lista"); // "lista" | "risultato"
+  const [pending, setPending] = useState([]); // termini da cercare, non ancora interrogati
+  const [manualInput, setManualInput] = useState("");
+  const [showImport, setShowImport] = useState(false);
+  const [noteText, setNoteText] = useState("");
+
   const [searching, setSearching] = useState(false);
-  const [searchError, setSearchError] = useState("");
-  const [city, setCity] = useState("Zurigo");
+  const [searchErr, setSearchErr] = useState("");
+  const [items, setItems] = useState([]); // risultati dopo la query
+  const [source, setSource] = useState(null);
+
   const [stores, setStores] = useState(null);
   const [loadingStores, setLoadingStores] = useState(false);
 
-  const handleSearch = async () => {
-    const term = query.trim();
-    if (!term) return;
-    setSearching(true);
-    setSearchError("");
-    try {
-      const res = await fetch(`/api/search?q=${encodeURIComponent(term)}`);
-      const data = await res.json();
-      if (!data.results || data.results.length === 0) {
-        setSearchError(
-          data.debug ? `Nessun prodotto trovato per "${term}" (errore live: ${data.debug})` : `Nessun prodotto trovato per "${term}"`
-        );
-        return;
-      }
-      const product = data.results[0];
-      setList((l) => {
-        const idx = l.findIndex((i) => i.id === product.id);
-        if (idx >= 0) {
-          const copy = [...l];
-          copy[idx] = { ...copy[idx], qty: copy[idx].qty + 1 };
-          return copy;
-        }
-        const hasPromo = Array.isArray(data.promotions) && data.promotions.length > 0;
-        return [...l, { ...product, qty: 1, source: data.source, hasPromo }];
+  const addTerm = () => {
+    const t = manualInput.trim();
+    if (!t) return;
+    if (!pending.includes(t)) setPending((p) => [...p, t]);
+    setManualInput("");
+  };
+
+  const removeTerm = (i) => setPending((p) => p.filter((_, idx) => idx !== i));
+
+  const importNote = () => {
+    const lines = noteText
+      .split("\n")
+      .map(parseNoteLine)
+      .filter(Boolean);
+    setPending((p) => {
+      const merged = [...p];
+      lines.forEach((l) => {
+        if (!merged.includes(l)) merged.push(l);
       });
-      setQuery("");
+      return merged;
+    });
+    setNoteText("");
+    setShowImport(false);
+  };
+
+  const runSearch = async () => {
+    if (pending.length === 0) return;
+    setSearching(true);
+    setSearchErr("");
+    try {
+      const res = await fetch("/api/search-batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ terms: pending }),
+      });
+      const data = await res.json();
+      setItems(data.items || []);
+      setSource(data.source);
+      setStep("risultato");
+      loadStores();
     } catch (err) {
-      setSearchError("Errore di rete durante la ricerca");
+      setSearchErr("Errore di rete durante la ricerca. Riprova.");
     } finally {
       setSearching(false);
     }
   };
 
-  const removeItem = (id) => setList((l) => l.filter((i) => i.id !== id));
-  const setQty = (id, qty) =>
-    setList((l) => l.map((i) => (i.id === id ? { ...i, qty: Math.max(1, qty) } : i)));
-
-  const totals = CHAINS.map((chain) => {
-    let total = 0;
-    let missing = 0;
-    list.forEach(({ qty, prices }) => {
-      const p = prices?.[chain.id];
-      if (p == null) missing += 1;
-      else total += p * qty;
-    });
-    return { ...chain, total, missing };
-  });
-
-  const fullyAvailable = totals.filter((t) => t.missing === 0);
-  const cheapest =
-    fullyAvailable.length > 0 ? fullyAvailable.reduce((a, b) => (b.total < a.total ? b : a)) : null;
-
-  const multiStoreTotal = list.reduce((sum, { qty, prices }) => {
-    const vals = CHAINS.map((c) => prices?.[c.id]).filter((v) => v != null);
-    if (vals.length === 0) return sum;
-    return sum + Math.min(...vals) * qty;
-  }, 0);
-  const savings = cheapest ? cheapest.total - multiStoreTotal : 0;
-
-  const loadStores = async (cityName) => {
+  const loadStores = async () => {
     setLoadingStores(true);
-    const coords = CITIES[cityName];
     try {
-      const res = await fetch(`/api/stores?lat=${coords.lat}&lng=${coords.lng}`);
+      const res = await fetch(`/api/stores?lat=${WINTERTHUR.lat}&lng=${WINTERTHUR.lng}`);
       const data = await res.json();
       setStores(data.nearestByChain || null);
     } catch {
@@ -87,25 +101,32 @@ export default function Home() {
     }
   };
 
-  useEffect(() => {
-    if (step === "risultato") loadStores(city);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step]);
+  // Righe della tabella: comparabili (in entrambi) contano nel totale,
+  // quelle presenti solo in un negozio compaiono comunque ma sono escluse.
+  const comparableItems = items.filter((i) => i.prices.migros != null && i.prices.coop != null);
+  const totals = CHAINS.reduce((acc, c) => {
+    acc[c.id] = comparableItems.reduce((sum, i) => sum + (i.prices[c.id] || 0), 0);
+    return acc;
+  }, {});
+  const cheapestChain =
+    comparableItems.length > 0 ? (totals.migros <= totals.coop ? "migros" : "coop") : null;
 
   return (
     <div style={styles.page}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Mono:wght@400;600&family=Inter:wght@400;500;600&display=swap');
         * { box-sizing: border-box; }
-        body { margin: 0; background: #FAFAF7; }
+        body { margin: 0; background: #14140F; }
+        textarea::placeholder, input::placeholder { color: #6B6A63; }
+        select { color-scheme: dark; }
       `}</style>
 
       <header style={styles.header}>
         <div style={styles.brandRow}>
-          <div style={styles.brandMark}>CH</div>
+          <div style={styles.brandMark}>W</div>
           <div>
-            <div style={styles.eyebrow}>Confronto prezzi · Svizzera</div>
-            <h1 style={styles.h1}>{step === "lista" ? "Crea la tua lista della spesa" : "Dove conviene fare la spesa"}</h1>
+            <div style={styles.eyebrow}>Migros vs Coop · Winterthur</div>
+            <h1 style={styles.h1}>{step === "lista" ? "Costruisci la lista" : "Confronto prezzi"}</h1>
           </div>
         </div>
       </header>
@@ -115,61 +136,81 @@ export default function Home() {
           <section style={styles.panel}>
             <div style={styles.panelHead}>
               <ShoppingCart size={18} />
-              <span style={styles.panelTitle}>Lista della spesa</span>
-              <span style={styles.count}>{list.length}</span>
+              <span style={styles.panelTitle}>Prodotti da cercare</span>
+              <span style={styles.count}>{pending.length}</span>
             </div>
 
             <div style={styles.inlineRow}>
               <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-                placeholder="Cerca un prodotto (es. olio, latte…)"
+                value={manualInput}
+                onChange={(e) => setManualInput(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && addTerm()}
+                placeholder="es. olio, pasta Barilla, cetrioli…"
                 style={styles.textInput}
               />
-              <button onClick={handleSearch} style={styles.addBtn} disabled={searching}>
-                {searching ? "…" : "+"}
+              <button onClick={addTerm} style={styles.addBtn}>
+                +
               </button>
             </div>
-            {searchError && <div style={styles.errorText}>{searchError}</div>}
-            <div style={styles.footnoteSmall}>
-              Ricerca collegata a swissgroceries-mcp (prezzi reali). La prima ricerca dopo un
-              po' di inattività può richiedere qualche secondo in più.
-            </div>
+
+            <button onClick={() => setShowImport((v) => !v)} style={styles.importToggle}>
+              <ClipboardPaste size={14} />
+              {showImport ? "Nascondi import da nota" : "Incolla una nota (Google Keep, Note, ecc.)"}
+            </button>
+
+            {showImport && (
+              <div style={styles.importBox}>
+                <textarea
+                  value={noteText}
+                  onChange={(e) => setNoteText(e.target.value)}
+                  placeholder={"Incolla qui la tua lista, un prodotto per riga\nes.\nolio\npasta barilla\ncetrioli"}
+                  style={styles.textarea}
+                  rows={5}
+                />
+                <button
+                  onClick={importNote}
+                  disabled={!noteText.trim()}
+                  style={{ ...styles.secondaryBtn, opacity: !noteText.trim() ? 0.4 : 1 }}
+                >
+                  <Check size={14} />
+                  Aggiungi alla lista
+                </button>
+              </div>
+            )}
 
             <ul style={styles.list}>
-              {list.map(({ id, name, unit, qty, source, hasPromo }) => (
-                <li key={id} style={styles.listItem}>
-                  <div style={{ flex: 1 }}>
-                    <div style={styles.itemName}>
-                      {name} {hasPromo && <span style={styles.promoBadge}>in promozione</span>}
-                    </div>
-                    <div style={styles.itemUnit}>
-                      {unit} {source === "demo" && "· dati demo"}
-                    </div>
-                  </div>
-                  <input
-                    type="number"
-                    min={1}
-                    value={qty}
-                    onChange={(e) => setQty(id, parseInt(e.target.value) || 1)}
-                    style={styles.qtyInput}
-                  />
-                  <button onClick={() => removeItem(id)} style={styles.iconBtn}>
+              {pending.map((t, i) => (
+                <li key={i} style={styles.listItem}>
+                  <span style={{ flex: 1 }}>{t}</span>
+                  <button onClick={() => removeTerm(i)} style={styles.iconBtn}>
                     <X size={15} />
                   </button>
                 </li>
               ))}
-              {list.length === 0 && <li style={styles.empty}>La lista è vuota.</li>}
+              {pending.length === 0 && <li style={styles.empty}>Nessun prodotto aggiunto ancora.</li>}
             </ul>
 
+            {searchErr && <div style={styles.errorText}>{searchErr}</div>}
+
             <button
-              disabled={list.length === 0}
-              onClick={() => setStep("risultato")}
-              style={{ ...styles.primaryBtn, opacity: list.length === 0 ? 0.4 : 1 }}
+              disabled={pending.length === 0 || searching}
+              onClick={runSearch}
+              style={{ ...styles.primaryBtn, opacity: pending.length === 0 ? 0.4 : 1 }}
             >
-              Vedi confronto prezzi <ArrowRight size={16} />
+              {searching ? (
+                <>
+                  <Loader2 size={16} className="spin" /> Cerco i prezzi…
+                </>
+              ) : (
+                <>
+                  Cerca prezzi ({pending.length}) <ArrowRight size={16} />
+                </>
+              )}
             </button>
+            <div style={styles.footnoteSmall}>
+              La ricerca parte una sola volta per tutti i prodotti aggiunti, non ad ogni singolo
+              inserimento.
+            </div>
           </section>
         </main>
       )}
@@ -179,32 +220,61 @@ export default function Home() {
           <section style={styles.panel}>
             <div style={styles.panelHead}>
               <TrendingDown size={18} />
-              <span style={styles.panelTitle}>Confronto per negozio</span>
-            </div>
-            <div style={styles.chainGrid}>
-              {totals.map((t) => {
-                const isCheapest = cheapest && t.id === cheapest.id;
-                return (
-                  <div key={t.id} style={{ ...styles.chainCard, borderColor: isCheapest ? "#3F7D5C" : "#E4E2DC" }}>
-                    <div style={styles.chainTop}>
-                      <span style={{ ...styles.dot, background: t.color }} />
-                      <span style={styles.chainName}>{t.name}</span>
-                      {isCheapest && <span style={styles.badge}>più economico</span>}
-                    </div>
-                    <div style={styles.chainTotal}>{t.missing > 0 ? "—" : money(t.total)}</div>
-                    {t.missing > 0 && <div style={styles.warn}>{t.missing} prodotto/i non disponibile/i</div>}
-                  </div>
-                );
-              })}
+              <span style={styles.panelTitle}>Tabella di confronto</span>
             </div>
 
-            {list.length > 0 && (
-              <div style={styles.multiBox}>
-                <div style={styles.multiTop}>Comprando ogni prodotto dove costa meno</div>
-                <div style={styles.multiRow}>
-                  <span style={styles.multiTotal}>{money(multiStoreTotal)}</span>
-                  {cheapest && savings > 0.01 && (
-                    <span style={styles.multiSave}>risparmi {money(savings)} rispetto a {cheapest.name} da solo</span>
+            {source === "demo" && (
+              <div style={styles.demoWarning}>
+                Alcuni prezzi sono dati demo (la ricerca live non ha risposto per tutti i prodotti).
+              </div>
+            )}
+
+            <div style={styles.tableWrap}>
+              <table style={styles.table}>
+                <thead>
+                  <tr>
+                    <th style={styles.thProduct}>Prodotto</th>
+                    <th style={styles.th}>Migros</th>
+                    <th style={styles.th}>Coop</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.map((item, i) => {
+                    const excluded = item.prices.migros == null || item.prices.coop == null;
+                    return (
+                      <tr key={i} style={excluded ? styles.trExcluded : undefined}>
+                        <td style={styles.tdProduct}>
+                          {item.name}
+                          {excluded && <div style={styles.excludedNote}>escluso dal totale</div>}
+                        </td>
+                        <td style={styles.td}>{money(item.prices.migros)}</td>
+                        <td style={styles.td}>{money(item.prices.coop)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                <tfoot>
+                  <tr>
+                    <td style={styles.tdTotalLabel}>Totale</td>
+                    <td style={{ ...styles.tdTotal, color: cheapestChain === "migros" ? "#7CD98A" : "#E8E6DE" }}>
+                      {comparableItems.length > 0 ? money(totals.migros) : "—"}
+                    </td>
+                    <td style={{ ...styles.tdTotal, color: cheapestChain === "coop" ? "#7CD98A" : "#E8E6DE" }}>
+                      {comparableItems.length > 0 ? money(totals.coop) : "—"}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+
+            {cheapestChain && (
+              <div style={styles.verdictBox}>
+                <div style={styles.verdictLabel}>Conviene andare da</div>
+                <div style={styles.verdictStore}>{cheapestChain === "migros" ? "Migros" : "Coop"}</div>
+                <div style={styles.verdictSaving}>
+                  risparmi {money(Math.abs(totals.migros - totals.coop))} rispetto all'altro negozio
+                  {items.length > comparableItems.length && (
+                    <> · {items.length - comparableItems.length} prodotto/i escluso/i dal calcolo</>
                   )}
                 </div>
               </div>
@@ -214,35 +284,18 @@ export default function Home() {
           <section style={styles.panel}>
             <div style={styles.panelHead}>
               <MapPin size={18} />
-              <span style={styles.panelTitle}>Negozio più vicino</span>
+              <span style={styles.panelTitle}>Negozi a Winterthur</span>
             </div>
-
-            <select
-              value={city}
-              onChange={(e) => {
-                setCity(e.target.value);
-                loadStores(e.target.value);
-              }}
-              style={styles.select}
-            >
-              {Object.keys(CITIES).map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
-
             {loadingStores && <div style={styles.footnoteSmall}>Cerco i negozi vicini…</div>}
-
             <ul style={styles.storeList}>
-              {CHAINS.map((chain) => {
-                const s = stores?.[chain.id];
+              {CHAINS.map((c) => {
+                const s = stores?.[c.id];
                 return (
-                  <li key={chain.id} style={styles.storeItem}>
-                    <span style={{ ...styles.dot, background: chain.color }} />
+                  <li key={c.id} style={styles.storeItem}>
+                    <span style={{ ...styles.dot, background: c.color }} />
                     <div style={{ flex: 1 }}>
-                      <div style={styles.storeName}>{s ? s.name : "Nessun negozio trovato nel raggio"}</div>
-                      <div style={styles.storeChain}>{chain.name}</div>
+                      <div style={styles.storeName}>{s ? s.name : "Nessun negozio trovato"}</div>
+                      <div style={styles.storeChain}>{c.name}</div>
                     </div>
                     {s && <div style={styles.storeKm}>{s.distanceKm.toFixed(1)} km</div>}
                   </li>
@@ -262,54 +315,52 @@ export default function Home() {
 }
 
 const styles = {
-  page: { minHeight: "100vh", paddingBottom: 40, color: "#1A1A1A", fontFamily: "'Inter', sans-serif" },
-  header: { borderBottom: "1px solid #E4E2DC", padding: "28px 24px 20px" },
+  page: { minHeight: "100vh", background: "#14140F", color: "#E8E6DE", fontFamily: "'Inter', sans-serif", paddingBottom: 40 },
+  header: { borderBottom: "1px solid #2A2A22", padding: "28px 24px 20px" },
   brandRow: { display: "flex", alignItems: "center", gap: 14 },
-  brandMark: {
-    width: 44, height: 44, background: "#D8232A", color: "#FAFAF7",
-    display: "flex", alignItems: "center", justifyContent: "center",
-    fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 15,
-  },
-  eyebrow: { fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, textTransform: "uppercase", color: "#8A8A85" },
-  h1: { fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 22, margin: 0 },
-  main: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 20, padding: 24, maxWidth: 1100, margin: "0 auto" },
+  brandMark: { width: 44, height: 44, background: "#D8232A", color: "#F5F3EA", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 18, flexShrink: 0 },
+  eyebrow: { fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, letterSpacing: 1, textTransform: "uppercase", color: "#8C8A80" },
+  h1: { fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 21, margin: 0, color: "#F5F3EA" },
+  main: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 20, padding: 24, maxWidth: 1000, margin: "0 auto" },
   mainSingle: { padding: 24, maxWidth: 520, margin: "0 auto" },
-  panel: { background: "#FFFFFF", border: "1px solid #E4E2DC", borderRadius: 4, padding: 18 },
-  panelHead: { display: "flex", alignItems: "center", gap: 8, marginBottom: 16, paddingBottom: 12, borderBottom: "1px solid #E4E2DC" },
-  panelTitle: { fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 14, flex: 1 },
-  count: { fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, background: "#F4F1EA", padding: "2px 8px", borderRadius: 20 },
-  inlineRow: { display: "flex", gap: 8, marginBottom: 8 },
-  textInput: { flex: 1, padding: "10px 12px", border: "1px solid #E4E2DC", borderRadius: 4, fontSize: 13.5 },
-  addBtn: { width: 40, border: "1px solid #1A1A1A", background: "#1A1A1A", color: "#FAFAF7", borderRadius: 4, cursor: "pointer" },
-  errorText: { fontSize: 11.5, color: "#B0392B", marginBottom: 8 },
-  select: { width: "100%", padding: "10px 12px", border: "1px solid #E4E2DC", borderRadius: 4, fontSize: 13.5, marginBottom: 12 },
-  footnoteSmall: { fontSize: 11, color: "#8A8A85", marginBottom: 12, lineHeight: 1.5 },
-  list: { listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 8 },
-  listItem: { display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: "1px solid #F0EEE8" },
-  itemName: { fontSize: 13.5, fontWeight: 500 },
-  itemUnit: { fontSize: 11.5, color: "#8A8A85" },
-  promoBadge: { fontSize: 10, color: "#D8232A", border: "1px solid #D8232A", borderRadius: 20, padding: "1px 6px", marginLeft: 6 },
-  qtyInput: { width: 44, padding: "5px 6px", border: "1px solid #E4E2DC", borderRadius: 4, textAlign: "center" },
-  iconBtn: { border: "none", background: "transparent", color: "#8A8A85", cursor: "pointer" },
-  empty: { fontSize: 13, color: "#8A8A85", padding: "10px 0" },
-  primaryBtn: { marginTop: 18, width: "100%", padding: "13px 16px", background: "#D8232A", color: "#FAFAF7", border: "none", borderRadius: 4, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, cursor: "pointer" },
-  backBtn: { gridColumn: "1 / -1", justifySelf: "start", padding: "10px 16px", background: "transparent", border: "1px solid #E4E2DC", borderRadius: 4, display: "flex", alignItems: "center", gap: 8, cursor: "pointer" },
-  chainGrid: { display: "flex", flexDirection: "column", gap: 10 },
-  chainCard: { border: "1px solid", borderRadius: 4, padding: "12px 14px" },
-  chainTop: { display: "flex", alignItems: "center", gap: 8, marginBottom: 6 },
-  dot: { width: 9, height: 9, borderRadius: "50%" },
-  chainName: { fontSize: 13.5, fontWeight: 600, flex: 1 },
-  badge: { fontSize: 10, color: "#3F7D5C", border: "1px solid #3F7D5C", borderRadius: 20, padding: "2px 7px" },
-  chainTotal: { fontFamily: "'IBM Plex Mono', monospace", fontSize: 20, fontWeight: 600 },
-  warn: { fontSize: 11, color: "#B08900", marginTop: 4 },
-  multiBox: { marginTop: 16, padding: 14, background: "#F4F1EA", borderRadius: 4 },
-  multiTop: { fontSize: 12, color: "#5A5850", marginBottom: 6 },
-  multiRow: { display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" },
-  multiTotal: { fontFamily: "'IBM Plex Mono', monospace", fontSize: 20, fontWeight: 700, color: "#D8232A" },
-  multiSave: { fontSize: 12, color: "#3F7D5C" },
+  panel: { background: "#1C1C15", border: "1px solid #2A2A22", borderRadius: 6, padding: 18 },
+  panelHead: { display: "flex", alignItems: "center", gap: 8, marginBottom: 16, paddingBottom: 12, borderBottom: "1px solid #2A2A22" },
+  panelTitle: { fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 14, flex: 1, color: "#F5F3EA" },
+  count: { fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, background: "#2A2A22", padding: "2px 8px", borderRadius: 20, color: "#C9C7BC" },
+  inlineRow: { display: "flex", gap: 8, marginBottom: 10 },
+  textInput: { flex: 1, padding: "10px 12px", border: "1px solid #3A3A30", borderRadius: 4, fontSize: 13.5, background: "#14140F", color: "#E8E6DE" },
+  addBtn: { width: 40, border: "1px solid #D8232A", background: "#D8232A", color: "#F5F3EA", borderRadius: 4, cursor: "pointer", fontSize: 16 },
+  importToggle: { display: "flex", alignItems: "center", gap: 7, background: "transparent", border: "none", color: "#B0AEA2", fontSize: 12.5, padding: "6px 0 12px", cursor: "pointer", textDecoration: "underline", textUnderlineOffset: 3 },
+  importBox: { background: "#22221A", borderRadius: 4, padding: 12, marginBottom: 12 },
+  textarea: { width: "100%", padding: "10px 12px", border: "1px solid #3A3A30", borderRadius: 4, fontFamily: "'IBM Plex Mono', monospace", fontSize: 12.5, resize: "vertical", marginBottom: 8, background: "#14140F", color: "#E8E6DE" },
+  secondaryBtn: { display: "flex", alignItems: "center", gap: 7, padding: "9px 14px", background: "#F5F3EA", color: "#14140F", border: "none", borderRadius: 4, fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 12.5, cursor: "pointer" },
+  list: { listStyle: "none", margin: "6px 0 0", padding: 0, display: "flex", flexDirection: "column", gap: 6 },
+  listItem: { display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", background: "#22221A", borderRadius: 4, fontSize: 13.5 },
+  iconBtn: { border: "none", background: "transparent", color: "#8C8A80", cursor: "pointer" },
+  empty: { fontSize: 13, color: "#6B6A63", padding: "10px 0" },
+  errorText: { fontSize: 11.5, color: "#FF8A80", marginTop: 8 },
+  primaryBtn: { marginTop: 18, width: "100%", padding: "13px 16px", background: "#D8232A", color: "#F5F3EA", border: "none", borderRadius: 4, fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, cursor: "pointer" },
+  footnoteSmall: { fontSize: 11, color: "#6B6A63", marginTop: 10, lineHeight: 1.5 },
+  demoWarning: { fontSize: 11.5, color: "#E0B84D", background: "#2A2410", padding: "8px 10px", borderRadius: 4, marginBottom: 12 },
+  tableWrap: { overflowX: "auto" },
+  table: { width: "100%", borderCollapse: "collapse", fontSize: 13 },
+  thProduct: { textAlign: "left", padding: "8px 6px", borderBottom: "1px solid #3A3A30", color: "#8C8A80", fontWeight: 600, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5 },
+  th: { textAlign: "right", padding: "8px 6px", borderBottom: "1px solid #3A3A30", color: "#8C8A80", fontWeight: 600, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5 },
+  tdProduct: { padding: "10px 6px", borderBottom: "1px solid #22221A" },
+  td: { padding: "10px 6px", borderBottom: "1px solid #22221A", textAlign: "right", fontFamily: "'IBM Plex Mono', monospace" },
+  trExcluded: { opacity: 0.55 },
+  excludedNote: { fontSize: 10, color: "#E0B84D", marginTop: 2 },
+  tdTotalLabel: { padding: "10px 6px", fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 13 },
+  tdTotal: { padding: "10px 6px", textAlign: "right", fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 16 },
+  verdictBox: { marginTop: 16, padding: 14, background: "#16241A", borderRadius: 4, border: "1px solid #3F7D5C" },
+  verdictLabel: { fontSize: 11, color: "#8C8A80", textTransform: "uppercase", letterSpacing: 0.5 },
+  verdictStore: { fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 18, color: "#7CD98A", margin: "2px 0" },
+  verdictSaving: { fontSize: 12, color: "#B0AEA2" },
   storeList: { listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 8 },
-  storeItem: { display: "flex", alignItems: "center", gap: 10, padding: "6px 0", borderBottom: "1px solid #F0EEE8", fontSize: 13 },
+  storeItem: { display: "flex", alignItems: "center", gap: 10, padding: "6px 0", borderBottom: "1px solid #22221A", fontSize: 13 },
+  dot: { width: 9, height: 9, borderRadius: "50%", flexShrink: 0 },
   storeName: { fontSize: 13, fontWeight: 500 },
-  storeChain: { fontSize: 11, color: "#8A8A85" },
-  storeKm: { fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, color: "#5A5850" },
+  storeChain: { fontSize: 11, color: "#8C8A80" },
+  storeKm: { fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, color: "#B0AEA2" },
+  backBtn: { gridColumn: "1 / -1", justifySelf: "start", padding: "10px 16px", background: "transparent", border: "1px solid #3A3A30", borderRadius: 4, display: "flex", alignItems: "center", gap: 8, cursor: "pointer", color: "#E8E6DE" },
 };
