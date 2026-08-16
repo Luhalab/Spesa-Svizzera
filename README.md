@@ -5,7 +5,7 @@ Progetto Next.js pronto per GitHub + Vercel.
 ## Cosa fa davvero e cosa è ancora demo
 
 - **Negozi vicini** (`/api/stores`): dati **reali** da OpenStreetMap / Overpass API, nessuna chiave richiesta.
-- **Ricerca prodotti** (`/api/search`): tenta di usare **swissgroceries-mcp** (dati reali di Migros/Coop/Denner/Aldi), e torna automaticamente ai dati demo se non è configurato o non è raggiungibile.
+- **Ricerca prodotti + promozioni** (`/api/search`): usa **swissgroceries-mcp** direttamente da funzione serverless Vercel, senza backend separato — vedi la nota sotto sulla latenza. Torna automaticamente ai dati demo se la ricerca live non risponde in tempo.
 
 ## 1. Metti il progetto su GitHub
 
@@ -33,18 +33,13 @@ git push -u origin main
 
 Da quel momento ogni `git push` su `main` aggiorna automaticamente l'app online.
 
-## 3. Nota importante sull'integrazione con swissgroceries-mcp
+## 3. Nota sulla latenza (scelta di design)
 
-`swissgroceries-mcp` (github.com/nicktcode/swissgroceries-mcp) è un **server MCP**, pensato per essere avviato come processo a sé e interrogato via protocollo MCP — non è una libreria "leggera" da importare in una funzione serverless.
+Per evitare di gestire un servizio separato sempre acceso (Railway/Render), `pages/api/search.js` avvia `swissgroceries-mcp` come sotto-processo **direttamente dentro la funzione Vercel**, ad ogni richiesta. Questo significa:
 
-`lib/mcpClient.js` lo avvia con `npx -y @nicktcode/swissgroceries-mcp` e ci parla tramite `@modelcontextprotocol/sdk`. Questo **funziona in locale** (`npm run dev`), ma su Vercel ha due limiti da conoscere:
-
-- Le funzioni serverless di Vercel hanno un timeout e un cold-start: avviare un sotto-processo Node ad ogni richiesta è lento e può superare il timeout sui piani gratuiti.
-- Non è garantito che l'ambiente serverless di Vercel permetta di lanciare sotto-processi arbitrari con `npx`.
-
-**Soluzione consigliata**: tieni il frontend (questa app Next.js) su Vercel, ma sposta `/api/search` su un piccolo servizio Node **sempre acceso** (Railway, Render o Fly.io hanno piani gratuiti adatti), che tiene il processo `swissgroceries-mcp` avviato una sola volta e risponde velocemente ad ogni richiesta. Poi nel frontend punti `fetch` a quell'URL invece che a `/api/search` locale.
-
-Se preferisci restare semplice, l'app funziona comunque subito su Vercel usando i **dati demo** come fallback automatico — utile per mostrare l'interfaccia mentre imposti il backend reale con calma.
+- Ogni ricerca prodotto può richiedere **qualche secondo** (a volte di più), perché `npx` deve verificare/avviare il pacchetto da zero — non c'è un processo già "caldo" che risponde subito.
+- Il piano gratuito (Hobby) di Vercel permette funzioni fino a **60 secondi** (impostato in `pages/api/search.js` con `export const config = { maxDuration: 60 }`); se anche questo non basta, l'app torna automaticamente ai dati demo invece di mostrare un errore.
+- Se in futuro la lentezza diventasse un problema, la cartella `backend/` contiene già pronta l'alternativa con un server sempre acceso (vedi commenti nei file) — ma non è necessaria per far funzionare l'app.
 
 ## 4. Sviluppo locale
 
