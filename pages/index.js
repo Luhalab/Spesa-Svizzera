@@ -110,14 +110,16 @@ export default function Home() {
   const confirmSelection = () => {
     const finalItems = searchResults.map((r) => {
       const prices = {};
+      const sizes = {};
       let name = r.term;
       CHAINS.forEach((c) => {
         const selIdx = selections[r.term]?.[c.id];
         const chosen = selIdx != null ? r.candidates[c.id][selIdx] : null;
         prices[c.id] = chosen?.price ?? null;
+        sizes[c.id] = chosen?.size ?? null;
         if (chosen?.name && name === r.term) name = chosen.name;
       });
-      return { term: r.term, name, prices };
+      return { term: r.term, name, prices, sizes };
     });
     setItems(finalItems);
     setStep("risultato");
@@ -305,6 +307,7 @@ export default function Home() {
                             <span style={{ flex: 1, textAlign: "left" }}>
                               {c.name}
                               {c.brand && <span style={styles.selBrand}> · {c.brand}</span>}
+                              {c.size && <span style={styles.selSize}> ({c.size})</span>}
                             </span>
                             <span style={styles.selPrice}>{money(c.price)}</span>
                           </button>
@@ -369,6 +372,9 @@ export default function Home() {
                         {CHAINS.map((c) => (
                           <td key={c.id} style={styles.td}>
                             {money(item.prices[c.id])}
+                            {item.sizes?.[c.id] && (
+                              <div style={styles.tdSize}>{item.sizes[c.id]}</div>
+                            )}
                           </td>
                         ))}
                       </tr>
@@ -494,6 +500,7 @@ const styles = {
   selOption: { display: "flex", alignItems: "center", gap: 8, padding: "9px 10px", background: "#22221A", border: "1px solid #3A3A30", borderRadius: 4, color: "#C9C7BC", fontSize: 12.5, cursor: "pointer", textAlign: "left" },
   selOptionActive: { borderColor: "#3F7D5C", background: "#16241A", color: "#F5F3EA" },
   selBrand: { color: "#8C8A80", fontStyle: "italic" },
+  selSize: { color: "#6B6A63" },
   selPrice: { fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600 },
   dot: { width: 9, height: 9, borderRadius: "50%", flexShrink: 0 },
   backBtn: { padding: "10px 16px", background: "transparent", border: "1px solid #3A3A30", borderRadius: 4, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, cursor: "pointer", color: "#E8E6DE" },
@@ -503,6 +510,7 @@ const styles = {
   th: { textAlign: "right", padding: "8px 6px", borderBottom: "1px solid #3A3A30", color: "#8C8A80", fontWeight: 600, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5 },
   tdProduct: { padding: "10px 6px", borderBottom: "1px solid #22221A" },
   td: { padding: "10px 6px", borderBottom: "1px solid #22221A", textAlign: "right", fontFamily: "'IBM Plex Mono', monospace" },
+  tdSize: { fontFamily: "'Inter', sans-serif", fontSize: 9.5, color: "#6B6A63", marginTop: 1 },
   trExcluded: { opacity: 0.55 },
   excludedNote: { fontSize: 10, color: "#E0B84D", marginTop: 2 },
   tdTotalLabel: { padding: "10px 6px", fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 13 },
