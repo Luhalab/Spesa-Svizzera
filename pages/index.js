@@ -23,6 +23,9 @@ const WINTERTHUR = { lat: 47.5, lng: 8.75 };
 
 const money = (v) => (v == null ? "—" : `CHF ${v.toFixed(2)}`);
 
+const candidateKey = (c) => `${c.name}|${c.brand || ""}|${c.price}|${c.size || ""}`;
+const normalizeBrand = (b) => (b || "").trim().toLowerCase();
+
 const parseNoteLine = (line) => {
   const clean = line.replace(/^[\s\-\*•\u2022\u2610\u2611\[\]xX\d]+/, "").trim();
   return clean || line.trim();
@@ -38,7 +41,9 @@ export default function Home() {
   const [searching, setSearching] = useState(false);
   const [searchErr, setSearchErr] = useState("");
   const [searchResults, setSearchResults] = useState([]); // [{term, candidates:{migros:[],coop:[]}}]
-  const [selections, setSelections] = useState({}); // { term: { migros: idx|null, coop: idx|null } }
+  const [selections, setSelections] = useState({}); // { term: { migros: candidateKey|null|undefined } }
+  const [excludedBrands, setExcludedBrands] = useState([]);
+  const [brandInput, setBrandInput] = useState("");
   const [source, setSource] = useState(null);
 
   const [items, setItems] = useState([]); // risultato finale confermato
@@ -81,17 +86,7 @@ export default function Home() {
       const results = data.items || [];
       setSearchResults(results);
       setSource(data.source);
-
-      // Preseleziona il più economico per ogni catena, dove disponibile
-      const initSel = {};
-      results.forEach((r) => {
-        const sel = {};
-        CHAINS.forEach((c) => {
-          sel[c.id] = r.candidates[c.id]?.length > 0 ? 0 : null;
-        });
-        initSel[r.term] = sel;
-      });
-      setSelections(initSel);
+      setSelections({}); // auto: il più economico tra i filtrati, finché l'utente non sceglie
       setStep("seleziona");
     } catch (err) {
       setSearchErr("Errore di rete durante la ricerca. Riprova.");
@@ -100,12 +95,28 @@ export default function Home() {
     }
   };
 
-  const selectCandidate = (term, chainId, idx) => {
-    setSelections((s) => ({
-      ...s,
-      [term]: { ...s[term], [chainId]: s[term][chainId] === idx ? null : idx },
-    }));
+  const filteredCandidates = (list) =>
+    (list || []).filter((c) => !excludedBrands.includes(normalizeBrand(c.brand)));
+
+  const getSelectedCandidate = (term, chainId, list) => {
+    const filtered = filteredCandidates(list);
+    const sel = selections[term]?.[chainId];
+    if (sel === null) return null; // l'utente ha scelto esplicitamente "nessuno"
+    if (sel === undefined) return filtered[0] || null; // auto: il più economico tra i filtrati
+    return filtered.find((c) => candidateKey(c) === sel) || filtered[0] || null;
   };
+
+  const setSelection = (term, chainId, key) => {
+    setSelections((s) => ({ ...s, [term]: { ...s[term], [chainId]: key } }));
+  };
+
+  const addExcludedBrand = () => {
+    const b = normalizeBrand(brandInput);
+    if (!b) return;
+    if (!excludedBrands.includes(b)) setExcludedBrands((e) => [...e, b]);
+    setBrandInput("");
+  };
+  const removeExcludedBrand = (b) => setExcludedBrands((e) => e.filter((x) => x !== b));
 
   const confirmSelection = () => {
     const finalItems = searchResults.map((r) => {
@@ -113,8 +124,7 @@ export default function Home() {
       const sizes = {};
       let name = r.term;
       CHAINS.forEach((c) => {
-        const selIdx = selections[r.term]?.[c.id];
-        const chosen = selIdx != null ? r.candidates[c.id][selIdx] : null;
+        const chosen = getSelectedCandidate(r.term, c.id, r.candidates[c.id]);
         prices[c.id] = chosen?.price ?? null;
         sizes[c.id] = chosen?.size ?? null;
         if (chosen?.name && name === r.term) name = chosen.name;
@@ -271,59 +281,76 @@ export default function Home() {
               Alcuni risultati sono dati demo (la ricerca live non ha risposto per tutti).
             </div>
           )}
+
+          <section style={styles.panel}>
+            <div style={styles.panelHead}>
+              <span style={styles.panelTitle}>Escludi marche</span>
+            </div>
+            <div style={styles.inlineRow}>
+              <input
+                value={brandInput}
+                onChange={(e) => setBrandInput(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && addExcludedBrand()}
+                placeholder="es. Barilla"
+                style={styles.textInput}
+              />
+              <button onClick={addExcludedBrand} style={styles.addBtn}>
+                +
+              </button>
+            </div>
+            {excludedBrands.length > 0 && (
+              <div style={styles.chipsRow}>
+                {excludedBrands.map((b) => (
+                  <button key={b} onClick={() => removeExcludedBrand(b)} style={styles.chip}>
+                    {b} <X size={11} />
+                  </button>
+                ))}
+              </div>
+            )}
+            <div style={styles.footnoteSmall}>
+              Le marche escluse spariscono dai menu qui sotto per tutti i prodotti.
+            </div>
+          </section>
+
           {searchResults.map((r) => (
             <section key={r.term} style={styles.panel}>
               <div style={styles.selTermTitle}>"{r.term}"</div>
               {CHAINS.map((chain) => {
-                const cands = r.candidates[chain.id];
-                const selIdx = selections[r.term]?.[chain.id];
+                const allCands = r.candidates[chain.id] || [];
+                const cands = filteredCandidates(allCands);
+                const selected = getSelectedCandidate(r.term, chain.id, allCands);
+                const selValue = selected ? candidateKey(selected) : "__none__";
                 return (
-                  <div key={chain.id} style={styles.selChainBlock}>
-                    <div style={styles.selChainLabel}>
+                  <div key={chain.id} style={styles.selRow}>
+                    <div style={styles.selRowLabel}>
                       <span style={{ ...styles.dot, background: chain.color }} />
                       {chain.name}
-                      <span style={styles.selCount}>
-                        {cands.length === 0 ? "nessun risultato" : `${cands.length} trovato/i`}
-                        {r.rawCounts && r.rawCounts[chain.id] !== cands.length && (
-                          <> (grezzo: {r.rawCounts[chain.id]})</>
-                        )}
-                      </span>
                     </div>
-                    {cands.length === 0 ? (
-                      <div style={styles.selNone}>
-                        <CircleSlash size={13} /> Non trovato su {chain.name}
+                    {allCands.length === 0 ? (
+                      <div style={styles.selNoneInline}>
+                        <CircleSlash size={13} /> non trovato
+                      </div>
+                    ) : cands.length === 0 ? (
+                      <div style={styles.selNoneInline}>
+                        <CircleSlash size={13} /> tutto escluso dal filtro marche
                       </div>
                     ) : (
-                      <div style={styles.selOptions}>
-                        {cands.map((c, idx) => (
-                          <button
-                            key={idx}
-                            onClick={() => selectCandidate(r.term, chain.id, idx)}
-                            style={{
-                              ...styles.selOption,
-                              ...(selIdx === idx ? styles.selOptionActive : {}),
-                            }}
-                          >
-                            <span style={{ flex: 1, textAlign: "left" }}>
-                              {c.name}
-                              {c.brand && <span style={styles.selBrand}> · {c.brand}</span>}
-                              {c.size && <span style={styles.selSize}> ({c.size})</span>}
-                            </span>
-                            <span style={styles.selPrice}>{money(c.price)}</span>
-                          </button>
+                      <select
+                        value={selValue}
+                        onChange={(e) =>
+                          setSelection(r.term, chain.id, e.target.value === "__none__" ? null : e.target.value)
+                        }
+                        style={styles.selectDropdown}
+                      >
+                        {cands.map((c) => (
+                          <option key={candidateKey(c)} value={candidateKey(c)}>
+                            {c.name}
+                            {c.brand ? ` · ${c.brand}` : ""}
+                            {c.size ? ` (${c.size})` : ""} — {money(c.price)}
+                          </option>
                         ))}
-                        <button
-                          onClick={() => selectCandidate(r.term, chain.id, -1)}
-                          style={{
-                            ...styles.selOption,
-                            ...(selIdx == null ? styles.selOptionActive : {}),
-                            justifyContent: "center",
-                            color: "#8C8A80",
-                          }}
-                        >
-                          Nessuno di questi
-                        </button>
-                      </div>
+                        <option value="__none__">Nessuno di questi</option>
+                      </select>
                     )}
                   </div>
                 );
@@ -491,14 +518,13 @@ const styles = {
   primaryBtn: { width: "100%", padding: "13px 16px", background: "#D8232A", color: "#F5F3EA", border: "none", borderRadius: 4, fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, cursor: "pointer" },
   footnoteSmall: { fontSize: 11, color: "#6B6A63", marginTop: 10, lineHeight: 1.5 },
   demoWarning: { fontSize: 11.5, color: "#E0B84D", background: "#2A2410", padding: "8px 10px", borderRadius: 4 },
-  selTermTitle: { fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 15, marginBottom: 12, color: "#F5F3EA" },
-  selChainBlock: { marginBottom: 14 },
-  selChainLabel: { display: "flex", alignItems: "center", gap: 7, fontSize: 12.5, fontWeight: 600, marginBottom: 6 },
-  selCount: { marginLeft: "auto", fontSize: 10.5, color: "#8C8A80", fontWeight: 400 },
-  selNone: { display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#8C8A80", padding: "8px 10px", background: "#22221A", borderRadius: 4 },
-  selOptions: { display: "flex", flexDirection: "column", gap: 5 },
-  selOption: { display: "flex", alignItems: "center", gap: 8, padding: "9px 10px", background: "#22221A", border: "1px solid #3A3A30", borderRadius: 4, color: "#C9C7BC", fontSize: 12.5, cursor: "pointer", textAlign: "left" },
-  selOptionActive: { borderColor: "#3F7D5C", background: "#16241A", color: "#F5F3EA" },
+  selTermTitle: { fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 15, marginBottom: 10, color: "#F5F3EA" },
+  selRow: { display: "flex", alignItems: "center", gap: 10, padding: "7px 0", borderBottom: "1px solid #22221A" },
+  selRowLabel: { display: "flex", alignItems: "center", gap: 7, fontSize: 12.5, fontWeight: 600, width: 84, flexShrink: 0 },
+  selNoneInline: { display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "#6B6A63", flex: 1 },
+  selectDropdown: { flex: 1, minWidth: 0, padding: "8px 8px", background: "#22221A", border: "1px solid #3A3A30", borderRadius: 4, color: "#E8E6DE", fontSize: 12 },
+  chipsRow: { display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 },
+  chip: { display: "flex", alignItems: "center", gap: 5, padding: "5px 9px", background: "#2A2410", border: "1px solid #4A3F1A", borderRadius: 20, color: "#E0B84D", fontSize: 11.5, cursor: "pointer" },
   selBrand: { color: "#8C8A80", fontStyle: "italic" },
   selSize: { color: "#6B6A63" },
   selPrice: { fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600 },
