@@ -19,6 +19,12 @@ async function searchOnce(term) {
   return (await searchProducts(term))?.byChain || {};
 }
 
+function formatSize(p) {
+  const size = p?.size;
+  if (size?.value && size?.unit) return `${size.value}${size.unit}`;
+  return null;
+}
+
 function candidatesForChain(byChain, chainId, limit = 8) {
   const list = Array.isArray(byChain?.[chainId]) ? byChain[chainId] : [];
   const seen = new Set();
@@ -29,10 +35,11 @@ function candidatesForChain(byChain, chainId, limit = 8) {
     // Scarta prezzi mancanti o a zero: quasi certamente un dato mal
     // formattato nella risposta grezza, non un prodotto gratis.
     if (price == null || price <= 0 || !p?.name) return;
-    const key = `${p.name}|${p.brand || ""}|${price}`;
+    const size = formatSize(p);
+    const key = `${p.name}|${p.brand || ""}|${price}|${size || ""}`;
     if (seen.has(key)) return; // niente doppioni identici
     seen.add(key);
-    cleaned.push({ name: p.name, price, brand: p.brand || null });
+    cleaned.push({ name: p.name, price, brand: p.brand || null, size });
   });
 
   cleaned.sort((a, b) => a.price - b.price);
