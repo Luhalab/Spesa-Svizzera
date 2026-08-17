@@ -25,7 +25,7 @@ function formatSize(p) {
   return null;
 }
 
-function candidatesForChain(byChain, chainId, limit = 8) {
+function candidatesForChain(byChain, chainId) {
   const list = Array.isArray(byChain?.[chainId]) ? byChain[chainId] : [];
   const seen = new Set();
   const cleaned = [];
@@ -43,7 +43,7 @@ function candidatesForChain(byChain, chainId, limit = 8) {
   });
 
   cleaned.sort((a, b) => a.price - b.price);
-  return cleaned.slice(0, limit);
+  return cleaned; // nessun limite: tutti i risultati puliti, ordinati per prezzo
 }
 
 export default async function handler(req, res) {
