@@ -1,6 +1,5 @@
-// Trova i negozi Migros / Coop / Denner / Aldi più vicini usando
+// Trova i negozi Migros / Coop / Denner / Otto's più vicini usando
 // OpenStreetMap tramite Overpass API — dati pubblici, nessuna chiave richiesta.
-// (Overpass risponde in genere in meno di un secondo, non serve un timeout esteso.)
 
 const BRANDS = {
   migros: "Migros",
@@ -22,15 +21,39 @@ export default async function handler(req, res) {
     )
     .join("\n");
 
-  const query = `[out:json][timeout:15];(${brandFilter});out body;`;
+  const query = `[out:json][timeout:20];(${brandFilter});out body;`;
 
   try {
     const response = await fetch("https://overpass-api.de/api/interpreter", {
       method: "POST",
-      body: query,
-      headers: { "Content-Type": "text/plain" },
+      body: `data=${encodeURIComponent(query)}`,
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "User-Agent": "spesa-svizzera-app/1.0",
+      },
     });
-    const data = await response.json();
+
+    const rawText = await response.text();
+
+    if (!response.ok) {
+      console.error("Overpass ha risposto con errore:", response.status, rawText.slice(0, 500));
+      return res.status(502).json({
+        error: "Overpass API ha risposto con un errore",
+        status: response.status,
+        detail: rawText.slice(0, 500),
+      });
+    }
+
+    let data;
+    try {
+      data = JSON.parse(rawText);
+    } catch (parseErr) {
+      console.error("Risposta Overpass non è JSON valido:", rawText.slice(0, 500));
+      return res.status(502).json({
+        error: "Risposta Overpass non interpretabile",
+        detail: rawText.slice(0, 500),
+      });
+    }
 
     const stores = (data.elements || [])
       .filter((el) => el.tags?.name)
@@ -44,16 +67,15 @@ export default async function handler(req, res) {
 
     stores.sort((a, b) => a.distanceKm - b.distanceKm);
 
-    // Negozio più vicino per ciascuna delle 4 catene
     const nearestByChain = {};
     Object.entries(BRANDS).forEach(([id, brand]) => {
       nearestByChain[id] = stores.find((s) => s.name.toLowerCase().includes(brand.toLowerCase())) || null;
     });
 
-    return res.status(200).json({ stores, nearestByChain });
+    return res.status(200).json({ stores, nearestByChain, elementCount: data.elements?.length || 0 });
   } catch (err) {
-    console.error("Errore Overpass API:", err.message);
-    return res.status(502).json({ error: "Overpass API non raggiungibile" });
+    console.error("Errore chiamando Overpass API:", err.message);
+    return res.status(502).json({ error: "Overpass API non raggiungibile", detail: err.message });
   }
 }
 
