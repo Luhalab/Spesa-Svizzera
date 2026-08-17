@@ -152,6 +152,20 @@ export default function Home() {
   const cheapestTotal =
     comparableItems.length > 0 ? Math.min(...totalsList.map((t) => t.total)) : null;
 
+  // Secondo totale: "se faccio tutta la spesa qui", per catena — include
+  // ogni prodotto trovato in quella catena, anche se manca nelle altre.
+  // Non è un confronto alla pari (ogni negozio può coprire un numero
+  // diverso di prodotti), ma dice quanto spenderesti davvero in quel
+  // negozio con quello che riesci a trovarci.
+  const fullCoverage = CHAINS.reduce((acc, c) => {
+    const covered = items.filter((i) => i.prices[c.id] != null);
+    acc[c.id] = {
+      total: covered.reduce((sum, i) => sum + i.prices[c.id], 0),
+      count: covered.length,
+    };
+    return acc;
+  }, {});
+
   return (
     <div style={styles.page}>
       <style>{`
@@ -363,13 +377,30 @@ export default function Home() {
                 </tbody>
                 <tfoot>
                   <tr>
-                    <td style={styles.tdTotalLabel}>Totale</td>
+                    <td style={styles.tdTotalLabel}>
+                      Totale
+                      <div style={styles.totalSubLabel}>solo prodotti in tutti i negozi</div>
+                    </td>
                     {CHAINS.map((c) => (
                       <td
                         key={c.id}
                         style={{ ...styles.tdTotal, color: cheapestChain === c.id ? "#7CD98A" : "#E8E6DE" }}
                       >
                         {comparableItems.length > 0 ? money(totals[c.id]) : "—"}
+                      </td>
+                    ))}
+                  </tr>
+                  <tr>
+                    <td style={styles.tdTotalLabel}>
+                      Se fai la spesa lì
+                      <div style={styles.totalSubLabel}>tutto quello che c'è, anche se manca altrove</div>
+                    </td>
+                    {CHAINS.map((c) => (
+                      <td key={c.id} style={styles.tdTotalAlt}>
+                        {fullCoverage[c.id].count > 0 ? money(fullCoverage[c.id].total) : "—"}
+                        <div style={styles.totalCount}>
+                          {fullCoverage[c.id].count}/{items.length} prodotti
+                        </div>
                       </td>
                     ))}
                   </tr>
@@ -475,7 +506,10 @@ const styles = {
   trExcluded: { opacity: 0.55 },
   excludedNote: { fontSize: 10, color: "#E0B84D", marginTop: 2 },
   tdTotalLabel: { padding: "10px 6px", fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 13 },
+  totalSubLabel: { fontFamily: "'Inter', sans-serif", fontWeight: 400, fontSize: 9.5, color: "#8C8A80", marginTop: 2, textTransform: "none" },
   tdTotal: { padding: "10px 6px", textAlign: "right", fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, fontSize: 16 },
+  tdTotalAlt: { padding: "10px 6px", textAlign: "right", fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 14, color: "#C9C7BC" },
+  totalCount: { fontFamily: "'Inter', sans-serif", fontSize: 9.5, color: "#6B6A63", marginTop: 2 },
   verdictBox: { marginTop: 16, padding: 14, background: "#16241A", borderRadius: 4, border: "1px solid #3F7D5C" },
   verdictLabel: { fontSize: 11, color: "#8C8A80", textTransform: "uppercase", letterSpacing: 0.5 },
   verdictStore: { fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 18, color: "#7CD98A", margin: "2px 0" },
