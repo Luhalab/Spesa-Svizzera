@@ -26,6 +26,13 @@ const money = (v) => (v == null ? "—" : `CHF ${v.toFixed(2)}`);
 const candidateKey = (c) => `${c.name}|${c.brand || ""}|${c.price}|${c.size || ""}`;
 const normalizeBrand = (b) => (b || "").trim().toLowerCase();
 
+const DIET_OPTIONS = [
+  { id: "vegan", label: "Vegano" },
+  { id: "vegetarian", label: "Vegetariano" },
+  { id: "gluten-free", label: "Senza glutine" },
+  { id: "organic", label: "Bio" },
+];
+
 const parseNoteLine = (line) => {
   const clean = line.replace(/^[\s\-\*•\u2022\u2610\u2611\[\]xX\d]+/, "").trim();
   return clean || line.trim();
@@ -44,6 +51,8 @@ export default function Home() {
   const [selections, setSelections] = useState({}); // { term: { migros: candidateKey|null|undefined } }
   const [excludedBrands, setExcludedBrands] = useState([]);
   const [brandInput, setBrandInput] = useState("");
+  const [sortBy, setSortBy] = useState("price"); // "price" | "rating"
+  const [dietFilters, setDietFilters] = useState([]); // es. ["vegan", "organic"]
   const [source, setSource] = useState(null);
 
   const [items, setItems] = useState([]); // risultato finale confermato
@@ -95,8 +104,24 @@ export default function Home() {
     }
   };
 
-  const filteredCandidates = (list) =>
-    (list || []).filter((c) => !excludedBrands.includes(normalizeBrand(c.brand)));
+  const filteredCandidates = (list) => {
+    let result = (list || []).filter((c) => !excludedBrands.includes(normalizeBrand(c.brand)));
+    if (dietFilters.length > 0) {
+      result = result.filter((c) => dietFilters.every((d) => c.tags?.includes(d)));
+    }
+    result = [...result].sort((a, b) => {
+      if (sortBy === "rating") {
+        const ra = a.rating ?? -1;
+        const rb = b.rating ?? -1;
+        if (rb !== ra) return rb - ra;
+      }
+      return a.price - b.price;
+    });
+    return result;
+  };
+
+  const toggleDietFilter = (id) =>
+    setDietFilters((f) => (f.includes(id) ? f.filter((x) => x !== id) : [...f, id]));
 
   const getSelectedCandidate = (term, chainId, list) => {
     const filtered = filteredCandidates(list);
@@ -122,14 +147,23 @@ export default function Home() {
     const finalItems = searchResults.map((r) => {
       const prices = {};
       const sizes = {};
+      const details = {};
       let name = r.term;
       CHAINS.forEach((c) => {
         const chosen = getSelectedCandidate(r.term, c.id, r.candidates[c.id]);
         prices[c.id] = chosen?.price ?? null;
         sizes[c.id] = chosen?.size ?? null;
+        details[c.id] = chosen
+          ? {
+              imageUrl: chosen.imageUrl,
+              unitPrice: chosen.unitPrice,
+              multipack: chosen.multipack,
+              regularPrice: chosen.regularPrice,
+            }
+          : null;
         if (chosen?.name && name === r.term) name = chosen.name;
       });
-      return { term: r.term, name, prices, sizes };
+      return { term: r.term, name, prices, sizes, details };
     });
     setItems(finalItems);
     setStep("risultato");
@@ -312,6 +346,47 @@ export default function Home() {
             </div>
           </section>
 
+          <section style={styles.panel}>
+            <div style={styles.panelHead}>
+              <span style={styles.panelTitle}>Ordina e filtra</span>
+            </div>
+            <div style={styles.sortRow}>
+              <span style={styles.sortLabel}>Ordina per</span>
+              <div style={styles.sortToggle}>
+                <button
+                  onClick={() => setSortBy("price")}
+                  style={{ ...styles.sortBtn, ...(sortBy === "price" ? styles.sortBtnActive : {}) }}
+                >
+                  Prezzo
+                </button>
+                <button
+                  onClick={() => setSortBy("rating")}
+                  style={{ ...styles.sortBtn, ...(sortBy === "rating" ? styles.sortBtnActive : {}) }}
+                >
+                  Valutazione
+                </button>
+              </div>
+            </div>
+            <div style={styles.chipsRow}>
+              {DIET_OPTIONS.map((d) => (
+                <button
+                  key={d.id}
+                  onClick={() => toggleDietFilter(d.id)}
+                  style={{
+                    ...styles.dietChip,
+                    ...(dietFilters.includes(d.id) ? styles.dietChipActive : {}),
+                  }}
+                >
+                  {d.label}
+                </button>
+              ))}
+            </div>
+            <div style={styles.footnoteSmall}>
+              La valutazione non è disponibile per tutte le catene — quando manca, l'ordinamento
+              usa comunque il prezzo.
+            </div>
+          </section>
+
           {searchResults.map((r) => (
             <section key={r.term} style={styles.panel}>
               <div style={styles.selTermTitle}>"{r.term}"</div>
@@ -322,36 +397,73 @@ export default function Home() {
                 const selValue = selected ? candidateKey(selected) : "__none__";
                 return (
                   <div key={chain.id} style={styles.selRow}>
-                    <div style={styles.selRowLabel}>
-                      <span style={{ ...styles.dot, background: chain.color }} />
-                      {chain.name}
-                    </div>
-                    {allCands.length === 0 ? (
-                      <div style={styles.selNoneInline}>
-                        <CircleSlash size={13} /> non trovato
-                      </div>
-                    ) : cands.length === 0 ? (
-                      <div style={styles.selNoneInline}>
-                        <CircleSlash size={13} /> tutto escluso dal filtro marche
-                      </div>
-                    ) : (
-                      <select
-                        value={selValue}
-                        onChange={(e) =>
-                          setSelection(r.term, chain.id, e.target.value === "__none__" ? null : e.target.value)
-                        }
-                        style={styles.selectDropdown}
-                      >
-                        {cands.map((c) => (
-                          <option key={candidateKey(c)} value={candidateKey(c)}>
-                            {c.name}
-                            {c.brand ? ` · ${c.brand}` : ""}
-                            {c.size ? ` (${c.size})` : ""} — {money(c.price)}
-                          </option>
-                        ))}
-                        <option value="__none__">Nessuno di questi</option>
-                      </select>
+                    {selected?.imageUrl && (
+                      <img src={selected.imageUrl} alt="" style={styles.thumb} />
                     )}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={styles.selRowLabel}>
+                        <span style={{ ...styles.dot, background: chain.color }} />
+                        {chain.name}
+                      </div>
+                      {allCands.length === 0 ? (
+                        <div style={styles.selNoneInline}>
+                          <CircleSlash size={13} />{" "}
+                          {r.chainErrors?.[chain.id] ? (
+                            <span style={styles.errorInline}>bloccato: {r.chainErrors[chain.id]}</span>
+                          ) : (
+                            "non trovato"
+                          )}
+                        </div>
+                      ) : cands.length === 0 ? (
+                        <div style={styles.selNoneInline}>
+                          <CircleSlash size={13} /> tutto escluso dal filtro marche
+                        </div>
+                      ) : (
+                        <>
+                          <select
+                            value={selValue}
+                            onChange={(e) =>
+                              setSelection(r.term, chain.id, e.target.value === "__none__" ? null : e.target.value)
+                            }
+                            style={styles.selectDropdown}
+                          >
+                            {cands.map((c) => (
+                              <option key={candidateKey(c)} value={candidateKey(c)}>
+                                {c.name}
+                                {c.brand ? ` · ${c.brand}` : ""}
+                                {c.size ? ` (${c.size})` : ""}
+                                {c.multipack ? ` [pacco da ${c.multipack.count}]` : ""}
+                                {c.rating ? ` · ★${c.rating}` : ""} — {money(c.price)}
+                                {c.regularPrice ? ` (invece di ${money(c.regularPrice)})` : ""}
+                              </option>
+                            ))}
+                            <option value="__none__">Nessuno di questi</option>
+                          </select>
+                          {selected && (
+                            <div style={styles.selDetail}>
+                              {selected.unitPrice && (
+                                <span>
+                                  {money(selected.unitPrice.value)}/{selected.unitPrice.per}
+                                </span>
+                              )}
+                              {selected.multipack && (
+                                <span style={styles.multipackWarn}>
+                                  ⚠ pacco da {selected.multipack.count}
+                                  {selected.multipack.perUnitPrice
+                                    ? ` · ${money(selected.multipack.perUnitPrice)}/pz`
+                                    : ""}
+                                </span>
+                              )}
+                              {selected.regularPrice && (
+                                <span style={styles.discountTag}>
+                                  in sconto, invece di {money(selected.regularPrice)}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
                   </div>
                 );
               })}
@@ -390,20 +502,35 @@ export default function Home() {
                 <tbody>
                   {items.map((item, i) => {
                     const excluded = CHAINS.some((c) => item.prices[c.id] == null);
+                    const rowImage = CHAINS.map((c) => item.details?.[c.id]?.imageUrl).find(Boolean);
                     return (
                       <tr key={i} style={excluded ? styles.trExcluded : undefined}>
                         <td style={styles.tdProduct}>
-                          {item.name}
-                          {excluded && <div style={styles.excludedNote}>escluso dal totale</div>}
+                          <div style={styles.tdProductRow}>
+                            {rowImage && <img src={rowImage} alt="" style={styles.thumbSmall} />}
+                            <div>
+                              {item.name}
+                              {excluded && <div style={styles.excludedNote}>escluso dal totale</div>}
+                            </div>
+                          </div>
                         </td>
-                        {CHAINS.map((c) => (
-                          <td key={c.id} style={styles.td}>
-                            {money(item.prices[c.id])}
-                            {item.sizes?.[c.id] && (
-                              <div style={styles.tdSize}>{item.sizes[c.id]}</div>
-                            )}
-                          </td>
-                        ))}
+                        {CHAINS.map((c) => {
+                          const d = item.details?.[c.id];
+                          return (
+                            <td key={c.id} style={styles.td}>
+                              {money(item.prices[c.id])}
+                              {item.sizes?.[c.id] && <div style={styles.tdSize}>{item.sizes[c.id]}</div>}
+                              {d?.unitPrice && (
+                                <div style={styles.tdUnitPrice}>
+                                  {money(d.unitPrice.value)}/{d.unitPrice.per}
+                                </div>
+                              )}
+                              {d?.multipack && (
+                                <div style={styles.tdMultipack}>⚠ pacco da {d.multipack.count}</div>
+                              )}
+                            </td>
+                          );
+                        })}
                       </tr>
                     );
                   })}
@@ -519,12 +646,24 @@ const styles = {
   footnoteSmall: { fontSize: 11, color: "#6B6A63", marginTop: 10, lineHeight: 1.5 },
   demoWarning: { fontSize: 11.5, color: "#E0B84D", background: "#2A2410", padding: "8px 10px", borderRadius: 4 },
   selTermTitle: { fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 15, marginBottom: 10, color: "#F5F3EA" },
-  selRow: { display: "flex", alignItems: "center", gap: 10, padding: "7px 0", borderBottom: "1px solid #22221A" },
-  selRowLabel: { display: "flex", alignItems: "center", gap: 7, fontSize: 12.5, fontWeight: 600, width: 84, flexShrink: 0 },
+  selRow: { display: "flex", alignItems: "flex-start", gap: 10, padding: "9px 0", borderBottom: "1px solid #22221A" },
+  thumb: { width: 40, height: 40, borderRadius: 4, objectFit: "cover", background: "#0F0F0B", flexShrink: 0 },
+  selRowLabel: { display: "flex", alignItems: "center", gap: 7, fontSize: 12, fontWeight: 600, marginBottom: 4 },
+  selDetail: { display: "flex", flexWrap: "wrap", gap: 8, marginTop: 4, fontSize: 10.5, color: "#8C8A80" },
+  multipackWarn: { color: "#E0B84D" },
+  discountTag: { color: "#7CD98A" },
   selNoneInline: { display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "#6B6A63", flex: 1 },
+  errorInline: { color: "#E0654D" },
   selectDropdown: { flex: 1, minWidth: 0, padding: "8px 8px", background: "#22221A", border: "1px solid #3A3A30", borderRadius: 4, color: "#E8E6DE", fontSize: 12 },
   chipsRow: { display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 },
   chip: { display: "flex", alignItems: "center", gap: 5, padding: "5px 9px", background: "#2A2410", border: "1px solid #4A3F1A", borderRadius: 20, color: "#E0B84D", fontSize: 11.5, cursor: "pointer" },
+  sortRow: { display: "flex", alignItems: "center", gap: 10, marginBottom: 10 },
+  sortLabel: { fontSize: 12, color: "#8C8A80" },
+  sortToggle: { display: "flex", border: "1px solid #3A3A30", borderRadius: 4, overflow: "hidden" },
+  sortBtn: { padding: "6px 12px", background: "#22221A", border: "none", color: "#8C8A80", fontSize: 12, cursor: "pointer" },
+  sortBtnActive: { background: "#D8232A", color: "#F5F3EA" },
+  dietChip: { padding: "6px 12px", background: "#22221A", border: "1px solid #3A3A30", borderRadius: 20, color: "#8C8A80", fontSize: 11.5, cursor: "pointer" },
+  dietChipActive: { background: "#16241A", borderColor: "#3F7D5C", color: "#7CD98A" },
   selBrand: { color: "#8C8A80", fontStyle: "italic" },
   selSize: { color: "#6B6A63" },
   selPrice: { fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600 },
@@ -535,6 +674,10 @@ const styles = {
   thProduct: { textAlign: "left", padding: "8px 6px", borderBottom: "1px solid #3A3A30", color: "#8C8A80", fontWeight: 600, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5 },
   th: { textAlign: "right", padding: "8px 6px", borderBottom: "1px solid #3A3A30", color: "#8C8A80", fontWeight: 600, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5 },
   tdProduct: { padding: "10px 6px", borderBottom: "1px solid #22221A" },
+  tdProductRow: { display: "flex", alignItems: "center", gap: 8 },
+  thumbSmall: { width: 28, height: 28, borderRadius: 4, objectFit: "cover", background: "#0F0F0B", flexShrink: 0 },
+  tdUnitPrice: { fontFamily: "'Inter', sans-serif", fontSize: 9.5, color: "#6B6A63", marginTop: 1 },
+  tdMultipack: { fontFamily: "'Inter', sans-serif", fontSize: 9.5, color: "#E0B84D", marginTop: 1 },
   td: { padding: "10px 6px", borderBottom: "1px solid #22221A", textAlign: "right", fontFamily: "'IBM Plex Mono', monospace" },
   tdSize: { fontFamily: "'Inter', sans-serif", fontSize: 9.5, color: "#6B6A63", marginTop: 1 },
   trExcluded: { opacity: 0.55 },
