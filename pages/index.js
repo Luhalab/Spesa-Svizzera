@@ -22,6 +22,12 @@ const CHAINS = [
 const WINTERTHUR = { lat: 47.5, lng: 8.75 };
 
 const money = (v) => (v == null ? "—" : `CHF ${v.toFixed(2)}`);
+const formatDate = (iso) => {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d)) return iso;
+  return d.toLocaleDateString("it-CH", { day: "numeric", month: "short" });
+};
 
 const candidateKey = (c) => `${c.name}|${c.brand || ""}|${c.price}|${c.size || ""}`;
 const normalizeBrand = (b) => (b || "").trim().toLowerCase();
@@ -159,6 +165,7 @@ export default function Home() {
               unitPrice: chosen.unitPrice,
               multipack: chosen.multipack,
               regularPrice: chosen.regularPrice,
+              promoEndsAt: chosen.promoEndsAt,
             }
           : null;
         if (chosen?.name && name === r.term) name = chosen.name;
@@ -217,7 +224,8 @@ export default function Home() {
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Mono:wght@400;600&family=Inter:wght@400;500;600&display=swap');
         * { box-sizing: border-box; }
-        body { margin: 0; background: #14140F; }
+        body { margin: 0; background: #14140F; overflow-x: hidden; }
+        select { max-width: 100%; }
         textarea::placeholder, input::placeholder { color: #6B6A63; }
       `}</style>
 
@@ -457,6 +465,7 @@ export default function Home() {
                               {selected.regularPrice && (
                                 <span style={styles.discountTag}>
                                   in sconto, invece di {money(selected.regularPrice)}
+                                  {selected.promoEndsAt && ` (fino al ${formatDate(selected.promoEndsAt)})`}
                                 </span>
                               )}
                             </div>
@@ -487,11 +496,60 @@ export default function Home() {
               <span style={styles.panelTitle}>Tabella di confronto</span>
             </div>
 
+            <div style={styles.cardsWrap}>
+              {items.map((item, i) => {
+                const excluded = CHAINS.some((c) => item.prices[c.id] == null);
+                const rowImage = CHAINS.map((c) => item.details?.[c.id]?.imageUrl).find(Boolean);
+                return (
+                  <div key={i} style={{ ...styles.productCard, ...(excluded ? styles.trExcluded : {}) }}>
+                    <div style={styles.productCardHead}>
+                      {rowImage && <img src={rowImage} alt="" style={styles.thumbSmall} />}
+                      <div style={{ flex: 1 }}>
+                        <div style={styles.productCardName}>{item.name}</div>
+                        {excluded && <div style={styles.excludedNote}>escluso dal totale</div>}
+                      </div>
+                    </div>
+                    {CHAINS.map((c) => {
+                      const d = item.details?.[c.id];
+                      const has = item.prices[c.id] != null;
+                      return (
+                        <div key={c.id} style={styles.productChainRow}>
+                          <span style={{ ...styles.dot, background: c.color }} />
+                          <span style={styles.productChainName}>{c.name}</span>
+                          <div style={styles.productChainPriceBlock}>
+                            <span style={has ? styles.productChainPrice : styles.productChainPriceEmpty}>
+                              {money(item.prices[c.id])}
+                            </span>
+                            {item.sizes?.[c.id] && <span style={styles.productChainSub}> · {item.sizes[c.id]}</span>}
+                            {d?.unitPrice && (
+                              <span style={styles.productChainSub}>
+                                {" "}
+                                · {money(d.unitPrice.value)}/{d.unitPrice.per}
+                              </span>
+                            )}
+                            {d?.multipack && (
+                              <div style={styles.tdMultipack}>⚠ pacco da {d.multipack.count}</div>
+                            )}
+                            {d?.regularPrice && (
+                              <div style={styles.discountTag}>
+                                invece di {money(d.regularPrice)}
+                                {d.promoEndsAt && ` · fino al ${formatDate(d.promoEndsAt)}`}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+            </div>
+
             <div style={styles.tableWrap}>
               <table style={styles.table}>
                 <thead>
                   <tr>
-                    <th style={styles.thProduct}>Prodotto</th>
+                    <th style={styles.thProduct}></th>
                     {CHAINS.map((c) => (
                       <th key={c.id} style={styles.th}>
                         {c.name}
@@ -499,42 +557,6 @@ export default function Home() {
                     ))}
                   </tr>
                 </thead>
-                <tbody>
-                  {items.map((item, i) => {
-                    const excluded = CHAINS.some((c) => item.prices[c.id] == null);
-                    const rowImage = CHAINS.map((c) => item.details?.[c.id]?.imageUrl).find(Boolean);
-                    return (
-                      <tr key={i} style={excluded ? styles.trExcluded : undefined}>
-                        <td style={styles.tdProduct}>
-                          <div style={styles.tdProductRow}>
-                            {rowImage && <img src={rowImage} alt="" style={styles.thumbSmall} />}
-                            <div>
-                              {item.name}
-                              {excluded && <div style={styles.excludedNote}>escluso dal totale</div>}
-                            </div>
-                          </div>
-                        </td>
-                        {CHAINS.map((c) => {
-                          const d = item.details?.[c.id];
-                          return (
-                            <td key={c.id} style={styles.td}>
-                              {money(item.prices[c.id])}
-                              {item.sizes?.[c.id] && <div style={styles.tdSize}>{item.sizes[c.id]}</div>}
-                              {d?.unitPrice && (
-                                <div style={styles.tdUnitPrice}>
-                                  {money(d.unitPrice.value)}/{d.unitPrice.per}
-                                </div>
-                              )}
-                              {d?.multipack && (
-                                <div style={styles.tdMultipack}>⚠ pacco da {d.multipack.count}</div>
-                              )}
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    );
-                  })}
-                </tbody>
                 <tfoot>
                   <tr>
                     <td style={styles.tdTotalLabel}>
@@ -654,7 +676,7 @@ const styles = {
   discountTag: { color: "#7CD98A" },
   selNoneInline: { display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "#6B6A63", flex: 1 },
   errorInline: { color: "#E0654D" },
-  selectDropdown: { flex: 1, minWidth: 0, padding: "8px 8px", background: "#22221A", border: "1px solid #3A3A30", borderRadius: 4, color: "#E8E6DE", fontSize: 12 },
+  selectDropdown: { width: "100%", maxWidth: "100%", boxSizing: "border-box", padding: "8px 8px", background: "#22221A", border: "1px solid #3A3A30", borderRadius: 4, color: "#E8E6DE", fontSize: 12, textOverflow: "ellipsis" },
   chipsRow: { display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 },
   chip: { display: "flex", alignItems: "center", gap: 5, padding: "5px 9px", background: "#2A2410", border: "1px solid #4A3F1A", borderRadius: 20, color: "#E0B84D", fontSize: 11.5, cursor: "pointer" },
   sortRow: { display: "flex", alignItems: "center", gap: 10, marginBottom: 10 },
@@ -675,9 +697,19 @@ const styles = {
   th: { textAlign: "right", padding: "8px 6px", borderBottom: "1px solid #3A3A30", color: "#8C8A80", fontWeight: 600, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5 },
   tdProduct: { padding: "10px 6px", borderBottom: "1px solid #22221A" },
   tdProductRow: { display: "flex", alignItems: "center", gap: 8 },
-  thumbSmall: { width: 28, height: 28, borderRadius: 4, objectFit: "cover", background: "#0F0F0B", flexShrink: 0 },
+  thumbSmall: { width: 32, height: 32, borderRadius: 4, objectFit: "cover", background: "#0F0F0B", flexShrink: 0 },
   tdUnitPrice: { fontFamily: "'Inter', sans-serif", fontSize: 9.5, color: "#6B6A63", marginTop: 1 },
-  tdMultipack: { fontFamily: "'Inter', sans-serif", fontSize: 9.5, color: "#E0B84D", marginTop: 1 },
+  tdMultipack: { fontFamily: "'Inter', sans-serif", fontSize: 10, color: "#E0B84D", marginTop: 2 },
+  cardsWrap: { display: "flex", flexDirection: "column", gap: 10, marginBottom: 16 },
+  productCard: { background: "#181812", border: "1px solid #22221A", borderRadius: 6, padding: 12 },
+  productCardHead: { display: "flex", alignItems: "center", gap: 10, marginBottom: 8, paddingBottom: 8, borderBottom: "1px solid #22221A" },
+  productCardName: { fontSize: 14, fontWeight: 600, color: "#F5F3EA" },
+  productChainRow: { display: "flex", alignItems: "flex-start", gap: 8, padding: "6px 0" },
+  productChainName: { fontSize: 12, color: "#B0AEA2", width: 58, flexShrink: 0, marginTop: 1 },
+  productChainPriceBlock: { flex: 1, minWidth: 0 },
+  productChainPrice: { fontFamily: "'IBM Plex Mono', monospace", fontSize: 14, fontWeight: 700, color: "#E8E6DE" },
+  productChainPriceEmpty: { fontFamily: "'IBM Plex Mono', monospace", fontSize: 14, color: "#4A4940" },
+  productChainSub: { fontSize: 10.5, color: "#6B6A63" },
   td: { padding: "10px 6px", borderBottom: "1px solid #22221A", textAlign: "right", fontFamily: "'IBM Plex Mono', monospace" },
   tdSize: { fontFamily: "'Inter', sans-serif", fontSize: 9.5, color: "#6B6A63", marginTop: 1 },
   trExcluded: { opacity: 0.55 },
