@@ -15,12 +15,16 @@ const TARGET_CHAINS = ["migros", "coop", "denner", "ottos"];
 // richieste ravvicinate hanno il profilo tipico di un bot agli occhi della
 // protezione anti-bot di Coop (DataDome) e possono peggiorare il blocco
 // invece di aggirarlo. Meglio una richiesta sola, senza fretta.
+//
+// Restituisce sia byChain sia errors: il pacchetto segnala esplicitamente
+// quando una catena fallisce (es. Coop → "HTTP 403: Access Forbidden"),
+// il problema era solo che il codice prima ignorava questo campo.
 async function searchOnce(term) {
-  return (await searchProducts(term))?.byChain || {};
+  const result = await searchProducts(term);
+  return { byChain: result?.byChain || {}, errors: Array.isArray(result?.errors) ? result.errors : [] };
 }
 
-function formatSize(p) {
-  const size = p?.size;
+function formatSize(size) {
   if (size?.value && size?.unit) return `${size.value}${size.unit}`;
   return null;
 }
@@ -35,11 +39,56 @@ function candidatesForChain(byChain, chainId) {
     // Scarta prezzi mancanti o a zero: quasi certamente un dato mal
     // formattato nella risposta grezza, non un prodotto gratis.
     if (price == null || price <= 0 || !p?.name) return;
-    const size = formatSize(p);
+    const size = formatSize(p?.size);
     const key = `${p.name}|${p.brand || ""}|${price}|${size || ""}`;
     if (seen.has(key)) return; // niente doppioni identici
     seen.add(key);
-    cleaned.push({ name: p.name, price, brand: p.brand || null, size });
+
+    // "tags" normalizzato (quando presente) porta indicazioni dietetiche
+    // reali: vegan, vegetarian, gluten-free, organic, budget, ecc. Per Coop
+    // ci sono anche booleani più precisi nei dati grezzi specifici.
+    const tags = new Set(Array.isArray(p.tags) ? p.tags.map((t) => String(t).toLowerCase()) : []);
+    if (p?.raw?.vegan) tags.add("vegan");
+    if (p?.raw?.vegetarian) tags.add("vegetarian");
+    if (p?.raw?.glutenFree) tags.add("gluten-free");
+
+    const rating = p?.raw?.averageRating ?? p?.raw?.rating ?? null;
+    const numberOfRatings = p?.raw?.numberOfRatings ?? null;
+
+    // Prezzo al kg/litro: permette di confrontare formati diversi alla pari.
+    const unitPrice =
+      p?.unitPrice?.value != null && p?.unitPrice?.per
+        ? { value: p.unitPrice.value, per: p.unitPrice.per }
+        : null;
+
+    // Multipack: se il prezzo mostrato è per una confezione con più pezzi,
+    // questo evita l'errore già fatto una volta (pacco da 6 scambiato per
+    // pacco singolo).
+    const multipack = p?.multipack
+      ? {
+          count: p.multipack.count,
+          perUnitPrice: p.multipack.perUnitPrice ?? null,
+          perUnitSize: formatSize(p.multipack.perUnitSize),
+        }
+      : null;
+
+    // Prezzo pieno, quando il prodotto è in sconto.
+    const regularPrice =
+      p?.price?.regular != null && p.price.regular > price ? p.price.regular : null;
+
+    cleaned.push({
+      name: p.name,
+      price,
+      brand: p.brand || null,
+      size,
+      tags: [...tags],
+      rating,
+      numberOfRatings,
+      imageUrl: p.imageUrl || null,
+      unitPrice,
+      multipack,
+      regularPrice,
+    });
   });
 
   cleaned.sort((a, b) => a.price - b.price);
@@ -70,24 +119,20 @@ export default async function handler(req, res) {
     if (i > 0) await new Promise((r) => setTimeout(r, 1500));
 
     try {
-      const byChain = await searchOnce(term);
+      const { byChain, errors } = await searchOnce(term);
       if (!byChain) throw new Error("Formato risposta inatteso");
 
       const candidates = {};
       const rawCounts = {};
+      const chainErrors = {};
       TARGET_CHAINS.forEach((chainId) => {
         const rawList = Array.isArray(byChain?.[chainId]) ? byChain[chainId] : [];
         rawCounts[chainId] = rawList.length;
         candidates[chainId] = candidatesForChain(byChain, chainId);
+        const err = errors.find((e) => e.chain === chainId);
+        if (err) chainErrors[chainId] = err.reason || err.code || "errore sconosciuto";
       });
-      // Debug temporaneo: le chiavi presenti nella risposta grezza e un
-      // campione del primo elemento Coop (se c'è), per vedere la verità
-      // invece di continuare a ipotizzare.
-      const debug = {
-        byChainKeys: Object.keys(byChain || {}),
-        coopRawSample: Array.isArray(byChain?.coop) ? byChain.coop.slice(0, 1) : byChain?.coop,
-      };
-      items.push({ term, candidates, rawCounts, debug, raw: true });
+      items.push({ term, candidates, rawCounts, chainErrors, raw: true });
     } catch (err) {
       console.error(`Ricerca live fallita per "${term}", uso demo:`, err.message);
       source = "demo";
