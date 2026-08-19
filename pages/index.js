@@ -405,72 +405,80 @@ export default function Home() {
                 const selValue = selected ? candidateKey(selected) : "__none__";
                 return (
                   <div key={chain.id} style={styles.selRow}>
-                    {selected?.imageUrl && (
-                      <img src={selected.imageUrl} alt="" style={styles.thumb} />
-                    )}
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={styles.selRowLabel}>
-                        <span style={{ ...styles.dot, background: chain.color }} />
-                        {chain.name}
-                      </div>
-                      {allCands.length === 0 ? (
-                        <div style={styles.selNoneInline}>
-                          <CircleSlash size={13} />{" "}
-                          {r.chainErrors?.[chain.id] ? (
-                            <span style={styles.errorInline}>bloccato: {r.chainErrors[chain.id]}</span>
-                          ) : (
-                            "non trovato"
-                          )}
-                        </div>
-                      ) : cands.length === 0 ? (
-                        <div style={styles.selNoneInline}>
-                          <CircleSlash size={13} /> tutto escluso dal filtro marche
-                        </div>
-                      ) : (
-                        <>
-                          <select
-                            value={selValue}
-                            onChange={(e) =>
-                              setSelection(r.term, chain.id, e.target.value === "__none__" ? null : e.target.value)
-                            }
-                            style={styles.selectDropdown}
-                          >
-                            {cands.map((c) => (
-                              <option key={candidateKey(c)} value={candidateKey(c)}>
-                                {c.name}
-                                {c.brand ? ` · ${c.brand}` : ""}
-                                {c.size ? ` (${c.size})` : ""}
-                                {c.multipack ? ` [pacco da ${c.multipack.count}]` : ""}
-                                {c.rating ? ` · ★${c.rating}` : ""} — {money(c.price)}
-                                {c.regularPrice ? ` (invece di ${money(c.regularPrice)})` : ""}
-                              </option>
-                            ))}
-                            <option value="__none__">Nessuno di questi</option>
-                          </select>
-                          {selected && (
-                            <div style={styles.selDetail}>
-                              {selected.unitPrice && (
-                                <span>
-                                  {money(selected.unitPrice.value)}/{selected.unitPrice.per}
-                                </span>
-                              )}
-                              {selected.multipack && (
-                                <span style={styles.multipackWarn}>
-                                  ⚠ pacco da {selected.multipack.count}
-                                  {selected.multipack.perUnitPrice
-                                    ? ` · ${money(selected.multipack.perUnitPrice)}/pz`
-                                    : ""}
-                                </span>
-                              )}
-                              {selected.regularPrice && (
-                                <span style={styles.discountTag}>
-                                  in sconto, invece di {money(selected.regularPrice)}
-                                  {selected.promoEndsAt && ` (fino al ${formatDate(selected.promoEndsAt)})`}
-                                </span>
-                              )}
-                            </div>
-                          )}
-                        </>
+                    <div style={styles.selRowLabel}>
+                      <span style={{ ...styles.dot, background: chain.color }} />
+                      {chain.name}
+                    </div>
+                    <div style={styles.selRowBody}>
+                      {selected?.imageUrl && (
+                        <img src={selected.imageUrl} alt="" style={styles.thumb} />
+                      )}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        {allCands.length === 0 ? (
+                          <div style={styles.selNoneInline}>
+                            <CircleSlash size={13} />{" "}
+                            {r.chainErrors?.[chain.id] ? (
+                              <span style={styles.errorInline}>bloccato: {r.chainErrors[chain.id]}</span>
+                            ) : (
+                              "non trovato"
+                            )}
+                          </div>
+                        ) : cands.length === 0 ? (
+                          <div style={styles.selNoneInline}>
+                            <CircleSlash size={13} /> tutto escluso dal filtro marche
+                          </div>
+                        ) : (
+                          <>
+                            <select
+                              value={selValue}
+                              onChange={(e) =>
+                                setSelection(r.term, chain.id, e.target.value === "__none__" ? null : e.target.value)
+                              }
+                              style={styles.selectDropdown}
+                            >
+                              {cands.map((c) => (
+                                <option key={candidateKey(c)} value={candidateKey(c)}>
+                                  {c.name}
+                                  {c.brand ? ` · ${c.brand}` : ""}
+                                  {c.size ? ` (${c.size})` : ""}
+                                  {c.multipack ? ` [pacco da ${c.multipack.count}]` : ""}
+                                  {c.rating ? ` · ★${c.rating}` : ""} — {money(c.price)}
+                                  {c.regularPrice ? ` (invece di ${money(c.regularPrice)})` : ""}
+                                </option>
+                              ))}
+                              <option value="__none__">Nessuno di questi</option>
+                            </select>
+                            {selected && (
+                              <div style={styles.selFullName}>
+                                {selected.name}
+                                {selected.brand ? ` · ${selected.brand}` : ""}
+                                {selected.size ? ` (${selected.size})` : ""}
+                              </div>
+                            )}
+                            {selected && (
+                              <div style={styles.selDetail}>
+                                {selected.unitPrice && (
+                                  <span>
+                                    {money(selected.unitPrice.value)}/{selected.unitPrice.per}
+                                  </span>
+                                )}
+                                {selected.multipack && (
+                                  <span style={styles.multipackWarn}>
+                                    ⚠ pacco da {selected.multipack.count}
+                                    {selected.multipack.perUnitPrice
+                                      ? ` · ${money(selected.multipack.perUnitPrice)}/pz`
+                                      : ""}
+                                  </span>
+                                )}
+                                {selected.regularPrice && (
+                                  <span style={styles.discountTag}>
+                                    in sconto, invece di {money(selected.regularPrice)}
+                                    {selected.promoEndsAt && ` (fino al ${formatDate(selected.promoEndsAt)})`}
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                          </>
                       )}
                     </div>
                   </div>
@@ -668,10 +676,12 @@ const styles = {
   footnoteSmall: { fontSize: 11, color: "#6B6A63", marginTop: 10, lineHeight: 1.5 },
   demoWarning: { fontSize: 11.5, color: "#E0B84D", background: "#2A2410", padding: "8px 10px", borderRadius: 4 },
   selTermTitle: { fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 15, marginBottom: 10, color: "#F5F3EA" },
-  selRow: { display: "flex", alignItems: "flex-start", gap: 10, padding: "9px 0", borderBottom: "1px solid #22221A" },
-  thumb: { width: 40, height: 40, borderRadius: 4, objectFit: "cover", background: "#0F0F0B", flexShrink: 0 },
+  selRow: { display: "flex", flexDirection: "column", gap: 8, padding: "12px 0", borderBottom: "1px solid #22221A" },
+  thumb: { width: 128, height: 128, borderRadius: 8, objectFit: "cover", background: "#0F0F0B", flexShrink: 0 },
   selRowLabel: { display: "flex", alignItems: "center", gap: 7, fontSize: 12, fontWeight: 600, marginBottom: 4 },
+  selRowBody: { display: "flex", alignItems: "flex-start", gap: 10 },
   selDetail: { display: "flex", flexWrap: "wrap", gap: 8, marginTop: 4, fontSize: 10.5, color: "#8C8A80" },
+  selFullName: { fontSize: 11.5, color: "#C9C7BC", marginTop: 5, lineHeight: 1.4, whiteSpace: "normal", wordBreak: "break-word" },
   multipackWarn: { color: "#E0B84D" },
   discountTag: { color: "#7CD98A" },
   selNoneInline: { display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "#6B6A63", flex: 1 },
@@ -697,7 +707,7 @@ const styles = {
   th: { textAlign: "right", padding: "8px 6px", borderBottom: "1px solid #3A3A30", color: "#8C8A80", fontWeight: 600, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5 },
   tdProduct: { padding: "10px 6px", borderBottom: "1px solid #22221A" },
   tdProductRow: { display: "flex", alignItems: "center", gap: 8 },
-  thumbSmall: { width: 32, height: 32, borderRadius: 4, objectFit: "cover", background: "#0F0F0B", flexShrink: 0 },
+  thumbSmall: { width: 96, height: 96, borderRadius: 8, objectFit: "cover", background: "#0F0F0B", flexShrink: 0 },
   tdUnitPrice: { fontFamily: "'Inter', sans-serif", fontSize: 9.5, color: "#6B6A63", marginTop: 1 },
   tdMultipack: { fontFamily: "'Inter', sans-serif", fontSize: 10, color: "#E0B84D", marginTop: 2 },
   cardsWrap: { display: "flex", flexDirection: "column", gap: 10, marginBottom: 16 },
