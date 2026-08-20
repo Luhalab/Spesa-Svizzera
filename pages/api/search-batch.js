@@ -146,9 +146,10 @@ export default async function handler(req, res) {
       try {
         const { candidates: migrosCandidates, rawSearchResult } = await searchMigrosPilot(term);
         candidates.migros = migrosCandidates;
-        rawCounts.migros = Array.isArray(rawSearchResult)
-          ? rawSearchResult.length
-          : migrosCandidates.length;
+        rawCounts.migros =
+          rawSearchResult?.numberOfProducts ??
+          rawSearchResult?.productIds?.length ??
+          migrosCandidates.length;
       } catch (migrosErr) {
         console.error(`Pilota Migros fallito per "${term}", uso swissgroceries-mcp:`, migrosErr.message);
         const rawList = Array.isArray(byChain?.migros) ? byChain.migros : [];
