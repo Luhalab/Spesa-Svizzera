@@ -62,7 +62,7 @@ export default async function handler(req, res) {
       try {
         const raw = await client.callTool({
           name: "get_product_details",
-          arguments: { productIds: candidateIds },
+          arguments: { productIds: candidateIds.map(String) },
         });
         details.push({ ids: candidateIds, result: parseToolResult(raw) });
       } catch (e) {
