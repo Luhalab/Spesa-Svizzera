@@ -1,15 +1,16 @@
 import { searchProducts, getPromotions } from "../../lib/mcpClient";
+import { searchMigrosPilot } from "../../lib/migrosMcpClient";
 import { findDemoProduct } from "../../lib/demoCatalog";
 
-// Cerca più termini in una sola richiesta, riusando la stessa connessione a
-// swissgroceries-mcp per tutti. Invece di scegliere automaticamente il
-// risultato più economico (rischioso: può prendere un prodotto sbagliato),
-// restituisce fino a 5 candidati per catena, così l'utente sceglie a mano.
+// Cerca più termini in una sola richiesta. Migros passa dal pilota
+// migros-mcp (endpoint dedicato, più preciso); Coop/Denner/Otto's restano
+// su swissgroceries-mcp come prima.
 export const config = {
   maxDuration: 60,
 };
 
-const TARGET_CHAINS = ["migros", "coop", "denner", "ottos"];
+const SGM_CHAINS = ["coop", "denner", "ottos"]; // via swissgroceries-mcp
+const ALL_CHAINS = ["migros", ...SGM_CHAINS];
 
 // Una sola richiesta pulita per termine, senza retry immediati: due
 // richieste ravvicinate hanno il profilo tipico di un bot agli occhi della
@@ -76,6 +77,9 @@ function candidatesForChain(byChain, chainId) {
     const regularPrice =
       p?.price?.regular != null && p.price.regular > price ? p.price.regular : null;
 
+    // Data di scadenza della promozione, quando presente (es. Denner).
+    const promoEndsAt = p?.promotion?.endsAt || null;
+
     cleaned.push({
       name: p.name,
       price,
@@ -88,6 +92,7 @@ function candidatesForChain(byChain, chainId) {
       unitPrice,
       multipack,
       regularPrice,
+      promoEndsAt,
     });
   });
 
@@ -125,13 +130,33 @@ export default async function handler(req, res) {
       const candidates = {};
       const rawCounts = {};
       const chainErrors = {};
-      TARGET_CHAINS.forEach((chainId) => {
+
+      // Coop / Denner / Otto's: come prima, via swissgroceries-mcp.
+      SGM_CHAINS.forEach((chainId) => {
         const rawList = Array.isArray(byChain?.[chainId]) ? byChain[chainId] : [];
         rawCounts[chainId] = rawList.length;
         candidates[chainId] = candidatesForChain(byChain, chainId);
         const err = errors.find((e) => e.chain === chainId);
         if (err) chainErrors[chainId] = err.reason || err.code || "errore sconosciuto";
       });
+
+      // Migros: pilota migros-mcp, con fallback su swissgroceries-mcp se il
+      // pilota fallisce (es. pacchetto irraggiungibile) — così Migros non
+      // sparisce del tutto per un problema tecnico del pilota.
+      try {
+        const { candidates: migrosCandidates, rawSearchResult } = await searchMigrosPilot(term);
+        candidates.migros = migrosCandidates;
+        rawCounts.migros = Array.isArray(rawSearchResult)
+          ? rawSearchResult.length
+          : migrosCandidates.length;
+      } catch (migrosErr) {
+        console.error(`Pilota Migros fallito per "${term}", uso swissgroceries-mcp:`, migrosErr.message);
+        const rawList = Array.isArray(byChain?.migros) ? byChain.migros : [];
+        rawCounts.migros = rawList.length;
+        candidates.migros = candidatesForChain(byChain, "migros");
+        chainErrors.migros = `pilota non disponibile, dati di riserva: ${migrosErr.message}`;
+      }
+
       items.push({ term, candidates, rawCounts, chainErrors, raw: true });
     } catch (err) {
       console.error(`Ricerca live fallita per "${term}", uso demo:`, err.message);
