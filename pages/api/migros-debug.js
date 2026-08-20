@@ -58,12 +58,15 @@ export default async function handler(req, res) {
       .filter((id) => id != null);
 
     const details = [];
-    for (const id of candidateIds) {
+    if (candidateIds.length > 0) {
       try {
-        const raw = await client.callTool({ name: "get_product_details", arguments: { id } });
-        details.push({ id, result: parseToolResult(raw) });
+        const raw = await client.callTool({
+          name: "get_product_details",
+          arguments: { productIds: candidateIds },
+        });
+        details.push({ ids: candidateIds, result: parseToolResult(raw) });
       } catch (e) {
-        details.push({ id, error: e.message });
+        details.push({ ids: candidateIds, error: e.message });
       }
     }
 
