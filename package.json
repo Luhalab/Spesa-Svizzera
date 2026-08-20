@@ -13,6 +13,7 @@
     "react-dom": "18.3.1",
     "lucide-react": "0.383.0",
     "@modelcontextprotocol/sdk": "^1.0.0",
-    "@nicktcode/swissgroceries-mcp": "latest"
+    "@nicktcode/swissgroceries-mcp": "latest",
+    "migros-mcp": "latest"
   }
 }
