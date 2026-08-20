@@ -43,7 +43,9 @@ export default async function handler(req, res) {
 
     // Prova a individuare degli id dai primi elementi, in qualunque forma
     // arrivino, solo per recuperare anche qualche dettaglio di esempio.
-    const list = Array.isArray(searchResult)
+    const list = Array.isArray(searchResult?.productIds)
+      ? searchResult.productIds
+      : Array.isArray(searchResult)
       ? searchResult
       : Array.isArray(searchResult?.products)
       ? searchResult.products
