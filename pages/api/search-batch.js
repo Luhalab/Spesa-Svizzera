@@ -100,6 +100,33 @@ function candidatesForChain(byChain, chainId) {
   return cleaned; // nessun limite: tutti i risultati puliti, ordinati per prezzo
 }
 
+// Confronto tollerante dei nomi, per abbinare un prodotto Migros del
+// pilota a quello corrispondente nei dati di swissgroceries-mcp (che ha
+// le immagini) e "prestargli" l'immagine.
+function normalizeName(s) {
+  return (s || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function backfillMigrosImages(pilotCandidates, byChainMigros) {
+  const sgmList = Array.isArray(byChainMigros) ? byChainMigros : [];
+  const imageByName = new Map();
+  sgmList.forEach((p) => {
+    if (p?.imageUrl && p?.name) imageByName.set(normalizeName(p.name), p.imageUrl);
+  });
+  return pilotCandidates.map((c) => {
+    if (c.imageUrl) return c;
+    const norm = normalizeName(c.name);
+    const match = imageByName.get(norm) || [...imageByName.entries()].find(([n]) => n.includes(norm) || norm.includes(n))?.[1];
+    return match ? { ...c, imageUrl: match } : c;
+  });
+}
+
 export default async function handler(req, res) {
   const terms =
     req.method === "GET"
@@ -118,13 +145,22 @@ export default async function handler(req, res) {
     const term = String(terms[i]).trim();
     if (!term) continue;
 
-    // Pausa tra un prodotto e l'altro (non prima del primo): richieste
-    // ravvicinate hanno un profilo "da bot" agli occhi della protezione
-    // anti-bot di Coop, molto più di richieste isolate e distanziate.
-    if (i > 0) await new Promise((r) => setTimeout(r, 1500));
+    // Pausa leggera tra un prodotto e l'altro (non prima del primo). Ridotta
+    // rispetto a prima: non c'è prova che aiutasse davvero con Coop, e
+    // rallentava tutto senza benefici dimostrati.
+    if (i > 0) await new Promise((r) => setTimeout(r, 400));
 
     try {
-      const { byChain, errors } = await searchOnce(term);
+      // Le due ricerche sono indipendenti (processi/connessioni diversi):
+      // le lanciamo in parallelo invece che una dopo l'altra, dimezzando
+      // di fatto il tempo di attesa per ogni prodotto.
+      const [sgmResult, migrosResult] = await Promise.allSettled([
+        searchOnce(term),
+        searchMigrosPilot(term),
+      ]);
+
+      if (sgmResult.status === "rejected") throw sgmResult.reason;
+      const { byChain, errors } = sgmResult.value;
       if (!byChain) throw new Error("Formato risposta inatteso");
 
       const candidates = {};
@@ -142,20 +178,22 @@ export default async function handler(req, res) {
 
       // Migros: pilota migros-mcp, con fallback su swissgroceries-mcp se il
       // pilota fallisce (es. pacchetto irraggiungibile) — così Migros non
-      // sparisce del tutto per un problema tecnico del pilota.
-      try {
-        const { candidates: migrosCandidates, rawSearchResult } = await searchMigrosPilot(term);
-        candidates.migros = migrosCandidates;
+      // sparisce del tutto per un problema tecnico del pilota. Le immagini
+      // (assenti nel pilota) vengono "prestate" dai dati swissgroceries
+      // quando trovano un nome corrispondente.
+      if (migrosResult.status === "fulfilled") {
+        const { candidates: migrosCandidates, rawSearchResult } = migrosResult.value;
+        candidates.migros = backfillMigrosImages(migrosCandidates, byChain?.migros);
         rawCounts.migros =
           rawSearchResult?.numberOfProducts ??
           rawSearchResult?.productIds?.length ??
           migrosCandidates.length;
-      } catch (migrosErr) {
-        console.error(`Pilota Migros fallito per "${term}", uso swissgroceries-mcp:`, migrosErr.message);
+      } else {
+        console.error(`Pilota Migros fallito per "${term}", uso swissgroceries-mcp:`, migrosResult.reason?.message);
         const rawList = Array.isArray(byChain?.migros) ? byChain.migros : [];
         rawCounts.migros = rawList.length;
         candidates.migros = candidatesForChain(byChain, "migros");
-        chainErrors.migros = `pilota non disponibile, dati di riserva: ${migrosErr.message}`;
+        chainErrors.migros = `pilota non disponibile, dati di riserva: ${migrosResult.reason?.message}`;
       }
 
       items.push({ term, candidates, rawCounts, chainErrors, raw: true });
